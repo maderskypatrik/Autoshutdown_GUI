@@ -26,6 +26,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Package function app
+        run: cd dist && zip -r function-app.zip function-app
+
       - name: Deploy
         uses: Azure/static-web-apps-deploy@v1
         with:

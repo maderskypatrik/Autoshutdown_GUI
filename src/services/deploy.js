@@ -1,0 +1,304 @@
+const ARM = 'https://management.azure.com'
+
+const MANAGED_TAG_KEY = 'autoshutdown-managed'
+const MANAGED_TAG_VAL = 'v3'
+const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
+
+// Role definition IDs (built-in, subscription-scope assignments)
+const ROLE_VM_CONTRIBUTOR = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
+const ROLE_READER         = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+
+async function armFetch(token, url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers ?? {}),
+    },
+  })
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      msg = j.error?.message ?? j.message ?? msg
+    } catch {}
+    throw new Error(msg)
+  }
+  const contentType = res.headers.get('content-type') ?? ''
+  if (res.status === 204 || !contentType.includes('json')) return null
+  try { return await res.json() } catch { return null }
+}
+
+async function poll(fn, { intervalMs = 5000, timeoutMs = 180000 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const result = await fn()
+    if (result) return result
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  throw new Error('Timed out waiting for resource to provision.')
+}
+
+// ── Detection ────────────────────────────────────────────────────────────────
+
+export async function detectInstallation(token, subId) {
+  const data = await armFetch(
+    token,
+    `${ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        query: `Resources
+| where subscriptionId =~ '${subId}'
+| where type =~ 'microsoft.web/sites'
+| where tags['${MANAGED_TAG_KEY}'] =~ '${MANAGED_TAG_VAL}'
+| project id, name, resourceGroup, location, tags`,
+        subscriptions: [subId],
+      }),
+    }
+  )
+  const items = data?.data ?? []
+  if (items.length === 0) return null
+  const fa = items[0]
+  return {
+    functionAppId:   fa.id,
+    functionAppName: fa.name,
+    resourceGroup:   fa.resourceGroup,
+    location:        fa.location,
+    miPrincipalId:   fa.tags?.[MI_PRINCIPAL_TAG] ?? null,
+  }
+}
+
+// ── Install ──────────────────────────────────────────────────────────────────
+
+export async function installAutoShutdown(token, subId, config, onLog) {
+  const { resourceGroup, functionAppName, timezone } = config
+  const log = (msg, level = 'info') => onLog({ msg, level })
+
+  log('Reading resource group location...')
+  const rgData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourcegroups/${resourceGroup}?api-version=2021-04-01`
+  )
+  const location = rgData.location
+  log(`Location: ${location}`)
+
+  const rand = Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 4).padEnd(4, 'x')
+  const storageAccountName = `stautoshutdown${rand}`
+  const miName   = 'mi-autoshutdown'
+  const planName = 'plan-autoshutdown'
+  const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
+
+  // ── Step 1: User-Assigned Managed Identity ─────────────────────────────────
+  log('Creating User-Assigned Managed Identity...')
+  const miData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${miName}?api-version=2023-01-31`,
+    { method: 'PUT', body: JSON.stringify({ location, tags: managedTags }) }
+  )
+  const miResourceId  = miData.id
+  const miClientId    = miData.properties.clientId
+  const miPrincipalId = miData.properties.principalId
+  log(`Managed Identity created (principal: ${miPrincipalId})`, 'success')
+
+  // ── Step 2: Storage Account ────────────────────────────────────────────────
+  log(`Creating Storage Account: ${storageAccountName}...`)
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        kind: 'StorageV2',
+        location,
+        tags: managedTags,
+        sku: { name: 'Standard_LRS' },
+        properties: { supportsHttpsTrafficOnly: true, minimumTlsVersion: 'TLS1_2' },
+      }),
+    }
+  )
+  log('Waiting for Storage Account to provision (up to 3 min)...')
+  await poll(async () => {
+    const s = await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`
+    )
+    return s?.properties?.provisioningState === 'Succeeded' ? s : null
+  })
+  log('Storage Account ready.', 'success')
+
+  log('Retrieving storage key...')
+  const keysData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/listKeys?api-version=2023-01-01`,
+    { method: 'POST', body: '{}' }
+  )
+  const storageKey     = keysData.keys[0].value
+  const storageConnStr = `DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKey};EndpointSuffix=core.windows.net`
+
+  // ── Step 3: App Service Plan (Consumption/Y1) ──────────────────────────────
+  log(`Creating App Service Plan: ${planName}...`)
+  const planData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2023-01-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        kind: 'functionapp',
+        location,
+        tags: managedTags,
+        sku: { name: 'Y1', tier: 'Dynamic' },
+        properties: { reserved: false },
+      }),
+    }
+  )
+  const planId = planData.id
+  log('App Service Plan created.', 'success')
+
+  // ── Step 4: Function App ───────────────────────────────────────────────────
+  log(`Creating Function App: ${functionAppName}...`)
+  const packageUrl = `${window.location.origin}/function-app.zip`
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-01-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        kind: 'functionapp',
+        location,
+        tags: {
+          ...managedTags,
+          [MI_PRINCIPAL_TAG]: miPrincipalId,
+        },
+        identity: {
+          type: 'UserAssigned',
+          userAssignedIdentities: { [miResourceId]: {} },
+        },
+        properties: {
+          serverFarmId: planId,
+          siteConfig: {
+            appSettings: [
+              { name: 'AzureWebJobsStorage',                     value: storageConnStr },
+              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', value: storageConnStr },
+              { name: 'WEBSITE_CONTENTSHARE',                    value: functionAppName },
+              { name: 'FUNCTIONS_EXTENSION_VERSION',             value: '~4' },
+              { name: 'FUNCTIONS_WORKER_RUNTIME',                value: 'powershell' },
+              { name: 'WEBSITE_RUN_FROM_PACKAGE',                value: packageUrl },
+              { name: 'USER_ASSIGNED_MI_CLIENT_ID',              value: miClientId },
+              { name: 'WHATIF',                                  value: 'false' },
+              { name: 'WINDOW_MINUTES',                          value: '15' },
+              { name: 'TIMEZONE',                                value: timezone },
+            ],
+            powerShellVersion: '7.4',
+            use32BitWorkerProcess: false,
+          },
+        },
+      }),
+    }
+  )
+  log('Function App created.', 'success')
+
+  // ── Step 5: RBAC roles at subscription scope ───────────────────────────────
+  log('Assigning Virtual Machine Contributor role...')
+  await assignRole(token, subId, miPrincipalId, ROLE_VM_CONTRIBUTOR)
+  log('VM Contributor role assigned.', 'success')
+
+  log('Assigning Reader role...')
+  await assignRole(token, subId, miPrincipalId, ROLE_READER)
+  log('Reader role assigned.', 'success')
+
+  log('Installation complete!', 'success')
+  return { functionAppName, resourceGroup, location }
+}
+
+async function assignRole(token, subId, principalId, roleDefId) {
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments/${crypto.randomUUID()}?api-version=2022-04-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          roleDefinitionId: `/subscriptions/${subId}/providers/Microsoft.Authorization/roleDefinitions/${roleDefId}`,
+          principalId,
+          principalType: 'ServicePrincipal',
+        },
+      }),
+    }
+  )
+}
+
+// ── Uninstall ────────────────────────────────────────────────────────────────
+
+export async function uninstallAutoShutdown(token, subId, installation, onLog) {
+  const log = (msg, level = 'info') => onLog({ msg, level })
+  const { miPrincipalId } = installation
+
+  log('Finding AutoShutdown V3 resources...')
+  const data = await armFetch(
+    token,
+    `${ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        query: `Resources
+| where subscriptionId =~ '${subId}'
+| where tags['${MANAGED_TAG_KEY}'] =~ '${MANAGED_TAG_VAL}'
+| project id, name, type, resourceGroup`,
+        subscriptions: [subId],
+      }),
+    }
+  )
+  const resources = data?.data ?? []
+  log(`Found ${resources.length} resource(s) to remove.`)
+
+  if (miPrincipalId) {
+    log('Removing RBAC role assignments...')
+    try {
+      const raData = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$filter=principalId eq '${miPrincipalId}'`
+      )
+      for (const ra of raData?.value ?? []) {
+        await armFetch(token, `${ARM}${ra.id}?api-version=2022-04-01`, { method: 'DELETE' })
+        log(`  Removed: ${ra.id.split('/').at(-1)}`)
+      }
+    } catch (e) {
+      log(`  Warning: could not fully remove role assignments: ${e.message}`, 'warn')
+    }
+    log('Role assignments removed.', 'success')
+  }
+
+  // Delete resources in dependency order
+  const typeOrder = [
+    'microsoft.web/sites',
+    'microsoft.web/serverfarms',
+    'microsoft.storage/storageaccounts',
+    'microsoft.managedidentity/userassignedidentities',
+  ]
+  const sorted = [...resources].sort((a, b) => {
+    const ai = typeOrder.indexOf(a.type.toLowerCase())
+    const bi = typeOrder.indexOf(b.type.toLowerCase())
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi)
+  })
+
+  for (const res of sorted) {
+    const label = `${res.type.split('/').at(-1)}: ${res.name}`
+    log(`Deleting ${label}...`)
+    try {
+      await armFetch(token, `${ARM}${res.id}?api-version=${apiVersionFor(res.type)}`, { method: 'DELETE' })
+      log(`  Deleted: ${res.name}`, 'success')
+    } catch (e) {
+      log(`  Warning: ${e.message}`, 'warn')
+    }
+  }
+
+  log('Uninstallation complete. All AutoShutdown resources have been removed.', 'success')
+}
+
+function apiVersionFor(type) {
+  const t = type.toLowerCase()
+  if (t.includes('managedidentity')) return '2023-01-31'
+  return '2023-01-01'
+}

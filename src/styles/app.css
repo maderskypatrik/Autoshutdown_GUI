@@ -309,3 +309,170 @@ body {
 .save-msg-success { color: var(--green); font-weight: 500; }
 .save-msg-error   { color: var(--red);   font-weight: 500; }
 .validation-warn  { font-size: 12px; color: var(--red); }
+
+/* ── Subscription status bar ────────────────────────────────── */
+.sub-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.sub-status-icon    { font-size: 15px; flex-shrink: 0; }
+.sub-status-detail  { font-weight: 500; }
+.sub-status-sep     { color: var(--gray-400); margin: 0 6px; }
+
+.sub-status-checking     { background: var(--gray-100); border-color: var(--gray-300); color: var(--gray-600); }
+.sub-status-not-installed { background: #fff9f0; border-color: #f0c060; color: var(--gray-800); }
+.sub-status-installed    { background: #dff6dd; border-color: #a3d9a0; color: var(--gray-800); }
+
+.btn-install   { margin-left: auto; background: var(--blue);  color: var(--white); border: 1px solid var(--blue-dark); border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-install:hover   { background: var(--blue-dark); }
+.btn-uninstall { margin-left: auto; background: var(--white); color: var(--red);   border: 1px solid var(--red);       border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-uninstall:hover { background: #fde7e9; }
+.btn-danger    { background: var(--red); color: var(--white); border: 1px solid #a32218; border-radius: var(--radius); padding: 7px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-danger:hover { background: #a32218; }
+
+/* ── Modal overlay ──────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.modal {
+  background: var(--white);
+  border-radius: 6px;
+  width: 560px;
+  max-width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,.25);
+}
+.modal-sm { width: 480px; }
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--gray-300);
+}
+.modal-title  { font-size: 15px; font-weight: 600; }
+.modal-close  { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--gray-600); line-height: 1; padding: 4px; }
+.modal-close:hover { color: var(--gray-800); }
+
+.modal-steps {
+  display: flex;
+  gap: 0;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--gray-100);
+}
+.modal-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--gray-400);
+  flex: 1;
+}
+.modal-step.active { color: var(--blue); font-weight: 600; }
+.modal-step.done   { color: var(--green); }
+.step-num {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--gray-300);
+  color: var(--gray-600);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.modal-step.active .step-num { background: var(--blue);  color: var(--white); }
+.modal-step.done   .step-num { background: var(--green); color: var(--white); }
+
+.modal-body   { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+/* ── Install wizard ─────────────────────────────────────────── */
+.wizard-intro { font-size: 13px; color: var(--gray-600); margin-bottom: 16px; line-height: 1.5; }
+
+.tou-box {
+  background: var(--gray-100);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.tou-box ul   { padding-left: 18px; margin: 6px 0; }
+.tou-box p    { margin: 10px 0 0; }
+.tou-box p:first-child { margin-top: 0; }
+.tou-box a    { color: var(--blue); }
+
+.tou-agree {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.tou-agree input { cursor: pointer; }
+
+.wizard-fields  { display: flex; flex-direction: column; gap: 14px; }
+.wizard-field   { display: flex; flex-direction: column; gap: 4px; }
+.wizard-input   {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--gray-800);
+}
+.wizard-input:focus { outline: 2px solid var(--blue-light); border-color: var(--blue); }
+.wizard-hint    { font-size: 11px; color: var(--gray-400); }
+
+/* ── Install progress log ───────────────────────────────────── */
+.install-log {
+  background: #1e1e1e;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  height: 240px;
+  overflow-y: auto;
+  color: #d4d4d4;
+}
+.log-line        { white-space: pre-wrap; word-break: break-all; }
+.log-success     { color: #4ec9b0; }
+.log-error       { color: #f48771; }
+.log-warn        { color: #ce9178; }
+.log-info        { color: #d4d4d4; }
+
+/* ── Uninstall ──────────────────────────────────────────────── */
+.uninstall-info {
+  background: #fde7e9;
+  border: 1px solid #f4a0a7;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.uninstall-info ul   { padding-left: 18px; margin: 6px 0; }
+.uninstall-info p    { margin: 10px 0 0; }
+.uninstall-info p:first-child { margin-top: 0; }
+.uninstall-note { font-size: 12px; color: var(--gray-600); margin-top: 10px !important; }
