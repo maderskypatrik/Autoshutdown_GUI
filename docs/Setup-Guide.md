@@ -291,4 +291,10 @@ git push
 
 ---
 
+## See also
+
+- [Multi-Tenant-Deployment.md](Multi-Tenant-Deployment.md) — deploying for a different or additional Azure AD tenant
+
+---
+
 *PowerCloud Team · VM Auto-shutdown Manager · Setup Guide · v1.0*
