@@ -13,7 +13,7 @@ export default function Header({ account }) {
         <span className="header-username">{account?.username}</span>
         <button
           className="btn btn-ghost"
-          onClick={() => instance.logoutPopup()}
+          onClick={() => instance.logoutRedirect()}
         >
           Sign out
         </button>
