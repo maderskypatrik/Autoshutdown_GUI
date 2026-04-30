@@ -9,15 +9,18 @@ import './styles/app.css'
 const msalInstance = new PublicClientApplication(msalConfig)
 
 // MSAL browser v3 requires initialize() to complete before rendering
-msalInstance.initialize().then(() => {
-  ReactDOM.createRoot(document.getElementById('root')).render(
-    <MsalProvider instance={msalInstance}>
-      <App />
-    </MsalProvider>
-  )
-}).catch(err => {
-  document.getElementById('root').innerHTML =
-    `<div style="padding:40px;font-family:sans-serif;color:#c42b1c">
-      <strong>MSAL initialization failed:</strong> ${err.message}
-    </div>`
-})
+msalInstance.initialize()
+  .then(() => msalInstance.handleRedirectPromise())
+  .then(() => {
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <MsalProvider instance={msalInstance}>
+        <App />
+      </MsalProvider>
+    )
+  })
+  .catch(err => {
+    document.getElementById('root').innerHTML =
+      `<div style="padding:40px;font-family:sans-serif;color:#c42b1c">
+        <strong>Authentication error:</strong> ${err.message}
+      </div>`
+  })

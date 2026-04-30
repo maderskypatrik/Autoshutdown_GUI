@@ -5,7 +5,7 @@ export default function LoginPage() {
   const { instance } = useMsal()
 
   const handleLogin = () => {
-    instance.loginPopup({ scopes: armScopes }).catch(console.error)
+    instance.loginRedirect({ scopes: armScopes }).catch(console.error)
   }
 
   return (
