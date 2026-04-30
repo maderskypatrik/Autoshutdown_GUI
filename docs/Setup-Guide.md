@@ -273,9 +273,9 @@ The user can read VMs but cannot write tags. Ask a subscription admin to assign 
 - Check that the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret is set correctly in GitHub → Settings → Secrets
 - Check the Actions log for the specific error message
 
-### App loads but sign-in popup is blocked
+### App loads but sign-in does not complete
 
-Allow popups from the app URL in your browser settings, or switch to `instance.loginRedirect()` in [src/components/LoginPage.jsx](../src/components/LoginPage.jsx) instead of `loginPopup()`.
+The app uses redirect-based login (no popup). If the sign-in loop repeats without completing, check that the redirect URI is registered correctly in the App Registration → Authentication (see Step 1.5).
 
 ---
 
