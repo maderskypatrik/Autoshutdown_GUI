@@ -19,6 +19,8 @@ jobs:
         with:
           submodules: true
           lfs: false
+      - name: Package function app
+        run: cd public/function-app && zip -r ../function-app.zip .
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
