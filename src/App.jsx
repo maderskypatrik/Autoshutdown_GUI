@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
-import { getSubscriptions, getResourceGroups, getVMs, updateVMTags, patchVMTags } from './services/azure'
+import { getSubscriptions, getResourceGroups, getVMs, patchVMTags } from './services/azure'
 import { detectInstallation } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
@@ -232,12 +232,12 @@ export default function App() {
         if (e.noShutdown) newTags.donotshutdown = 'true'
         if (e.noStart)    newTags.donotstart    = 'true'
         try {
-          await updateVMTags(token, vm.id, newTags)
+          await patchVMTags(token, vm.id, newTags)
           saved.push({ vmId: vm.id, newTags })
         } catch (err) {
           const isAuthz = err.message.includes('403') || err.message.toLowerCase().includes('authorization')
           errors.push(isAuthz
-            ? `${vm.name}: You need Tag Contributor, Contributor, or Owner to save schedule changes.`
+            ? `${vm.name}: You need VM Contributor, Contributor, or Owner to save schedule changes.`
             : `${vm.name}: ${err.message}`)
         }
       }
@@ -250,10 +250,11 @@ export default function App() {
           const next = { ...prev }
           for (const { vmId, newTags } of saved) {
             next[vmId] = {
-              shutdown:   getTagCI(newTags, 'shutdown')      ?? '',
-              startup:    getTagCI(newTags, 'startup')       ?? '',
+              shutdown:   getTagCI(newTags, 'shutdown')           ?? '',
+              startup:    getTagCI(newTags, 'startup')            ?? '',
               noShutdown: hasTagCI(newTags, 'donotshutdown'),
               noStart:    hasTagCI(newTags, 'donotstart'),
+              enrolled:   hasTagCI(newTags, 'autoshutdown-enrolled'),
             }
           }
           return next

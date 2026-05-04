@@ -57,21 +57,8 @@ export async function getVMs(token, subId, rg = null) {
   return data.data
 }
 
-// Replaces the entire tag set on a VM using the dedicated Tags API.
-// This only touches tags — all other VM properties are untouched.
-export async function updateVMTags(token, resourceId, tags) {
-  await armFetch(
-    token,
-    `${ARM}${resourceId}/providers/Microsoft.Resources/tags/default?api-version=2021-04-01`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ properties: { tags } }),
-    }
-  )
-}
-
 // Updates VM tags via the VM PATCH API, which requires Microsoft.Compute/virtualMachines/write.
-// Use this for enrollment changes — Azure will return 403 for Tag Contributor and below.
+// Azure enforces the permission — Tag Contributor and below receive a 403.
 export async function patchVMTags(token, resourceId, tags) {
   await armFetch(
     token,
