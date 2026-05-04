@@ -33,20 +33,21 @@ function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
           placeholder="HH:mm"
           value={edit.shutdown}
           onChange={e => onEdit(vm.id, 'shutdown', e.target.value)}
-          disabled={edit.noShutdown}
+          disabled={!edit.enrolled || edit.noShutdown}
           maxLength={5}
-          title="Shutdown time in HH:mm local time, e.g. 18:30. Leave empty to remove."
+          title={!edit.enrolled ? 'Enroll this VM first' : 'Shutdown time in HH:mm local time, e.g. 18:30. Leave empty to remove.'}
         />
         {badShutdown && <span className="field-error">Use HH:mm</span>}
       </td>
 
       {/* Exclude from shutdown */}
       <td className="td-toggle">
-        <label className="toggle" title="Tag VM with donotshutdown — automation will skip it">
+        <label className="toggle" title={!edit.enrolled ? 'Enroll this VM first' : 'Tag VM with donotshutdown — automation will skip it'}>
           <input
             type="checkbox"
             checked={edit.noShutdown}
             onChange={e => onEdit(vm.id, 'noShutdown', e.target.checked)}
+            disabled={!edit.enrolled}
           />
           <span>Exclude</span>
         </label>
@@ -60,20 +61,21 @@ function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
           placeholder="HH:mm"
           value={edit.startup}
           onChange={e => onEdit(vm.id, 'startup', e.target.value)}
-          disabled={edit.noStart}
+          disabled={!edit.enrolled || edit.noStart}
           maxLength={5}
-          title="Startup time in HH:mm local time, e.g. 07:00. Leave empty to remove."
+          title={!edit.enrolled ? 'Enroll this VM first' : 'Startup time in HH:mm local time, e.g. 07:00. Leave empty to remove.'}
         />
         {badStartup && <span className="field-error">Use HH:mm</span>}
       </td>
 
       {/* Exclude from startup */}
       <td className="td-toggle">
-        <label className="toggle" title="Tag VM with donotstart — automation will skip it">
+        <label className="toggle" title={!edit.enrolled ? 'Enroll this VM first' : 'Tag VM with donotstart — automation will skip it'}>
           <input
             type="checkbox"
             checked={edit.noStart}
             onChange={e => onEdit(vm.id, 'noStart', e.target.checked)}
+            disabled={!edit.enrolled}
           />
           <span>Exclude</span>
         </label>
