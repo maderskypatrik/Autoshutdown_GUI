@@ -88,7 +88,7 @@ To remove a VM from automation, click **Unenroll**. The VM's tags are preserved 
 
 ## Setting a Schedule
 
-1. Enroll the VM first (see above)
+1. Enroll the VM first (see above) — the time and exclude fields are disabled until the VM is enrolled
 2. Click the **Shutdown** field and type a time in `HH:mm` format (e.g. `18:00`)
 3. Click the **Startup** field and type a time in `HH:mm` format (e.g. `07:00`)
 4. Rows with unsaved changes are highlighted — the footer shows how many VMs have pending changes
@@ -96,7 +96,7 @@ To remove a VM from automation, click **Unenroll**. The VM's tags are preserved 
 
 You can set only one of the two times if needed (e.g. auto-shutdown with no auto-startup).
 
-> A VM must be **both enrolled and have a schedule tag** for the automation to act on it. Setting times without enrolling has no effect.
+> Hovering over a disabled field on an unenrolled VM shows **"Enroll this VM first"**.
 
 ---
 
