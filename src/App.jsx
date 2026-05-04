@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
-import { getSubscriptions, getResourceGroups, getVMs, updateVMTags } from './services/azure'
+import { getSubscriptions, getResourceGroups, getVMs, updateVMTags, checkVMWritePermission } from './services/azure'
 import { detectInstallation } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
@@ -37,6 +37,7 @@ function vmToEdit(vm) {
     startup:    getTagCI(vm.tags, 'startup')    ?? '',
     noShutdown: hasTagCI(vm.tags, 'donotshutdown'),
     noStart:    hasTagCI(vm.tags, 'donotstart'),
+    enrolled:   hasTagCI(vm.tags, 'autoshutdown-enrolled'),
   }
 }
 
@@ -61,6 +62,7 @@ export default function App() {
   const [showInstallWizard, setShowInstallWizard] = useState(false)
   const [showUninstall,     setShowUninstall]     = useState(false)
   const [cachedToken,       setCachedToken]       = useState(null)
+  const [enrolling,         setEnrolling]         = useState({})
 
   const getToken = useCallback(async () => {
     try {
@@ -149,6 +151,48 @@ export default function App() {
   const handleEdit = (vmId, field, value) => {
     setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], [field]: value } }))
     setSaveResult(null)
+  }
+
+  const handleEnroll = async (vmId) => {
+    setEnrolling(prev => ({ ...prev, [vmId]: true }))
+    setError(null)
+    try {
+      const token = await getToken()
+      const canWrite = await checkVMWritePermission(token, vmId)
+      if (!canWrite) {
+        setError('You need Virtual Machine Contributor or Owner role on this VM to enroll it.')
+        return
+      }
+      const vm = vms.find(v => v.id === vmId)
+      const newTags = { ...(vm.tags ?? {}), 'autoshutdown-enrolled': 'true' }
+      await updateVMTags(token, vmId, newTags)
+      setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
+      setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: true } }))
+    } catch (e) {
+      setError(`Failed to enroll VM: ${e.message}`)
+    } finally {
+      setEnrolling(prev => ({ ...prev, [vmId]: false }))
+    }
+  }
+
+  const handleUnenroll = async (vmId) => {
+    setEnrolling(prev => ({ ...prev, [vmId]: true }))
+    setError(null)
+    try {
+      const token = await getToken()
+      const vm = vms.find(v => v.id === vmId)
+      const newTags = { ...(vm.tags ?? {}) }
+      for (const k of Object.keys(newTags)) {
+        if (k.toLowerCase() === 'autoshutdown-enrolled') delete newTags[k]
+      }
+      await updateVMTags(token, vmId, newTags)
+      setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
+      setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: false } }))
+    } catch (e) {
+      setError(`Failed to unenroll VM: ${e.message}`)
+    } finally {
+      setEnrolling(prev => ({ ...prev, [vmId]: false }))
+    }
   }
 
   const isDirty = (vm) => {
@@ -254,7 +298,15 @@ export default function App() {
         )}
 
         {!loading && vms.length > 0 && (
-          <VMTable vms={vms} edits={edits} onEdit={handleEdit} isDirty={isDirty} />
+          <VMTable
+            vms={vms}
+            edits={edits}
+            onEdit={handleEdit}
+            isDirty={isDirty}
+            onEnroll={handleEnroll}
+            onUnenroll={handleUnenroll}
+            enrolling={enrolling}
+          />
         )}
 
         {!loading && vms.length === 0 && selectedSubId && (

@@ -18,6 +18,7 @@ Your access level determines what you can do in the app.
 | What you want to do | Minimum required role |
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
+| Enroll or unenroll a VM | **Virtual Machine Contributor** or **Owner** on the VM |
 | Set or change shutdown / startup times | **Tag Contributor**, **Contributor**, or **Owner** on the subscription or resource group |
 | Exclude a VM from shutdown or startup | Same as above |
 | Install the AutoShutdown solution into a subscription | **Owner** on the subscription |
@@ -72,15 +73,30 @@ Times are interpreted in the timezone configured for the subscription's installa
 
 ---
 
-## Setting a Schedule
+## Enrolling a VM
+
+Before the automation will act on a VM, it must be explicitly enrolled. This is a deliberate step that requires **VM Contributor or Owner** role on the VM — it cannot be done by someone with Tag Contributor alone.
 
 1. Find the VM in the table
+2. Click **Enroll** in the Enrollment column
+3. The app checks your permissions on that VM — if insufficient, an error is shown
+4. If permitted, the VM is marked as enrolled and the automation will process it
+
+To remove a VM from automation, click **Unenroll**. The VM's tags are preserved but the automation will no longer act on it.
+
+---
+
+## Setting a Schedule
+
+1. Enroll the VM first (see above)
 2. Click the **Shutdown** field and type a time in `HH:mm` format (e.g. `18:00`)
 3. Click the **Startup** field and type a time in `HH:mm` format (e.g. `07:00`)
 4. Rows with unsaved changes are highlighted — the footer shows how many VMs have pending changes
 5. Click **Save Changes**
 
 You can set only one of the two times if needed (e.g. auto-shutdown with no auto-startup).
+
+> A VM must be **both enrolled and have a schedule tag** for the automation to act on it. Setting times without enrolling has no effect.
 
 ---
 

@@ -80,6 +80,7 @@ Resources
 | where type =~ 'microsoft.compute/virtualmachines'
     or type =~ 'microsoft.azurestackhci/virtualmachineinstances'
 | where isnotnull(tags.startup)
+| where isnotnull(tags['autoshutdown-enrolled'])
 | project
     id, name, resourceGroup, subscriptionId, type, tags,
     powerState = iff(

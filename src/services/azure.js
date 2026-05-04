@@ -69,3 +69,31 @@ export async function updateVMTags(token, resourceId, tags) {
     }
   )
 }
+
+// Returns true if the current user has Microsoft.Compute/virtualMachines/write
+// on the given VM resource ID (i.e. VM Contributor or Owner).
+export async function checkVMWritePermission(token, vmResourceId) {
+  try {
+    const data = await armFetch(
+      token,
+      `${ARM}${vmResourceId}/providers/Microsoft.Authorization/permissions?api-version=2022-04-01`
+    )
+    return (data?.value ?? []).some(p =>
+      (p.actions ?? []).some(a => actionCovers(a, 'Microsoft.Compute/virtualMachines/write')) &&
+      !(p.notActions ?? []).some(a => actionCovers(a, 'Microsoft.Compute/virtualMachines/write'))
+    )
+  } catch {
+    return false
+  }
+}
+
+function actionCovers(pattern, target) {
+  if (pattern === '*') return true
+  const p = pattern.toLowerCase().split('/')
+  const t = target.toLowerCase().split('/')
+  for (let i = 0; i < p.length; i++) {
+    if (p[i] === '*') return true
+    if (p[i] !== (t[i] ?? '')) return false
+  }
+  return p.length === t.length
+}

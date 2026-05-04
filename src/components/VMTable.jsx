@@ -3,14 +3,13 @@ import { useState } from 'react'
 const TIME_RE = /^\d{1,2}:\d{2}$/
 
 function isValidTime(v) {
-  if (!v) return true // empty = remove tag, that's valid
+  if (!v) return true
   return TIME_RE.test(v)
 }
 
-function VMRow({ vm, edit, onEdit, dirty }) {
-  const enrolled       = !!(edit.shutdown || edit.startup)
-  const badShutdown    = !isValidTime(edit.shutdown)
-  const badStartup     = !isValidTime(edit.startup)
+function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
+  const badShutdown = !isValidTime(edit.shutdown)
+  const badStartup  = !isValidTime(edit.startup)
 
   return (
     <tr className={dirty ? 'row-dirty' : ''}>
@@ -80,18 +79,39 @@ function VMRow({ vm, edit, onEdit, dirty }) {
         </label>
       </td>
 
-      {/* Enrollment status */}
-      <td className="td-status">
-        {enrolled
-          ? <span className="badge badge-enrolled">Enrolled</span>
-          : <span className="badge badge-none">Not enrolled</span>
-        }
+      {/* Enrollment */}
+      <td className="td-enroll">
+        {edit.enrolled ? (
+          <div className="enroll-cell">
+            <span className="badge badge-enrolled">Enrolled</span>
+            <button
+              className="btn-unenroll-sm"
+              onClick={() => onUnenroll(vm.id)}
+              disabled={enrolling}
+              title="Remove this VM from the automation allowlist"
+            >
+              {enrolling ? '…' : 'Unenroll'}
+            </button>
+          </div>
+        ) : (
+          <div className="enroll-cell">
+            <span className="badge badge-none">Not enrolled</span>
+            <button
+              className="btn-enroll-sm"
+              onClick={() => onEnroll(vm.id)}
+              disabled={enrolling}
+              title="Enroll this VM — requires VM Contributor or Owner role"
+            >
+              {enrolling ? '…' : 'Enroll'}
+            </button>
+          </div>
+        )}
       </td>
     </tr>
   )
 }
 
-export default function VMTable({ vms, edits, onEdit, isDirty }) {
+export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenroll, enrolling }) {
   const [search, setSearch] = useState('')
 
   const filtered = vms.filter(vm =>
@@ -100,10 +120,7 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
     vm.resourceGroup.toLowerCase().includes(search.toLowerCase())
   )
 
-  const enrolledCount = vms.filter(vm => {
-    const e = edits[vm.id]
-    return e && (e.shutdown || e.startup)
-  }).length
+  const enrolledCount = vms.filter(vm => edits[vm.id]?.enrolled).length
 
   return (
     <div className="table-wrap">
@@ -131,7 +148,7 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
               <th rowSpan={2}>Location</th>
               <th colSpan={2} className="th-group">Shutdown</th>
               <th colSpan={2} className="th-group">Startup</th>
-              <th rowSpan={2}>Status</th>
+              <th rowSpan={2}>Enrollment</th>
             </tr>
             <tr className="th-sub">
               <th>Time</th>
@@ -150,9 +167,12 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
                 <VMRow
                   key={vm.id}
                   vm={vm}
-                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false }}
+                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false, enrolled: false }}
                   onEdit={onEdit}
                   dirty={isDirty(vm)}
+                  onEnroll={onEnroll}
+                  onUnenroll={onUnenroll}
+                  enrolling={!!enrolling[vm.id]}
                 />
               ))
             )}
