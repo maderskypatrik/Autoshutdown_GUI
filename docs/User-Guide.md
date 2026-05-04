@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — User Guide
 
-**PowerCloud Team · v1.0**
-**Last updated: 2026-04-30**
+**PowerCloud Team · v1.1**
+**Last updated: 2026-05-04**
 
 ---
 

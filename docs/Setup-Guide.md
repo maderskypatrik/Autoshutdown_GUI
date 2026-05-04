@@ -1,13 +1,13 @@
 # VM Auto-shutdown Manager — Setup Guide
 
-**PowerCloud Team · v1.0**
-**Last updated: 2026-04-29**
+**PowerCloud Team · v1.1**
+**Last updated: 2026-05-04**
 
 ---
 
 ## Overview
 
-This guide walks you through the full setup from zero to a running web app. The app lets users log in with their Microsoft account, browse their Azure VMs, and set or remove shutdown/startup schedules by editing tags — directly from the browser with no backend or secrets required.
+This guide walks you through the full setup from zero to a running web app. The app lets users log in with their Microsoft account, browse their Azure VMs, explicitly enroll VMs into automation, and set shutdown/startup schedules — directly from the browser with no backend or secrets required.
 
 **What you will set up:**
 
@@ -203,7 +203,7 @@ npm run dev
 
 Open `http://localhost:5173` in your browser. You should see the login screen.
 
-Click **Sign in with Microsoft** — a popup appears asking for consent. After signing in:
+Click **Sign in with Microsoft** — you are redirected to the Microsoft login page and back. After signing in:
 - The subscription dropdown populates
 - Select a subscription → Resource Groups load
 - Select a Resource Group (or leave as "All") → click **Load VMs**
@@ -225,13 +225,19 @@ Click **Sign in with Microsoft** — a popup appears asking for consent. After s
 | Action | What happens |
 |---|---|
 | Sign in | MSAL.js authenticates with Entra ID and gets an ARM access token |
-| Load VMs | App calls Azure Resource Graph API with the user's token — returns VM names, RGs, and current tags |
-| Edit time | You type a time in `HH:mm` format — change is tracked locally, not saved yet |
+| Load VMs | App calls Azure Resource Graph API with the user's token — returns all VM names, RGs, and current tags |
+| Enroll VM | App checks the user has VM Contributor or Owner on the VM via ARM permissions API, then sets `autoshutdown-enrolled: true` tag |
+| Edit time | User types a time in `HH:mm` format — change is tracked locally, not saved yet |
 | Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
 | Save Changes | For each modified VM, app calls the ARM Tags API to replace the tag set |
-| Return later | App always reads current tag values from Azure — it's stateless |
+| Function App | Every 15 minutes, queries Resource Graph for VMs that have **both** `autoshutdown-enrolled` and `shutdown`/`startup` tags, then acts only on those in the current time window |
+| Return later | App always reads current tag values from Azure — it is stateless |
 
 Times are in **local time** as configured by the `TIMEZONE` app setting of the Function App (default: `Central European Standard Time`).
+
+### VM enrollment security model
+
+The `autoshutdown-enrolled` tag acts as an explicit allowlist gate. A VM with a `shutdown` tag but without `autoshutdown-enrolled` is completely ignored by the Function App. This prevents users who have only Tag Contributor permissions from accidentally or intentionally enrolling VMs into the automation — enrollment requires VM Contributor or Owner, verified by the app at the time of enrollment.
 
 ---
 
@@ -252,17 +258,16 @@ To find the Managed Identity name: open the Function App in the portal → **Tag
 
 ## Required permissions for users
 
-Users need at least one of these Azure RBAC roles on the VM, Resource Group, or Subscription to use the app:
+| What the user wants to do | Minimum required role |
+|---|---|
+| Sign in and view VMs | **Reader** on the subscription or resource group |
+| Enroll or unenroll a VM | **Virtual Machine Contributor** or **Owner** on the VM |
+| Set or change shutdown / startup times | **Tag Contributor**, **Contributor**, or **Owner** on the subscription or resource group |
+| Install the AutoShutdown solution | **Owner** on the subscription |
 
-| Role | Can read VMs | Can edit tags |
-|---|---|---|
-| Owner | Yes | Yes |
-| Contributor | Yes | Yes |
-| Virtual Machine Contributor | Yes | Yes |
-| Tag Contributor | Yes (via Reader) | Yes |
-| Reader | Yes | No |
+Users with only Reader access can see VMs and their enrollment status but cannot make any changes.
 
-Users with only Reader access can view VM enrollment status but cannot save changes.
+Users with Tag Contributor can set schedule times but cannot enroll VMs — the Function App will ignore unenlrolled VMs regardless of tags.
 
 ---
 
