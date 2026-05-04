@@ -113,19 +113,22 @@ Clicking **Install** opens a wizard that:
 2. Creates a Storage Account
 3. Creates a Consumption App Service Plan
 4. Deploys the Function App with the shutdown/startup logic
-5. Assigns the Managed Identity the necessary RBAC roles on the subscription
+5. Assigns the Managed Identity Reader and VM Contributor roles on the subscription
 
 The installation takes approximately 2–5 minutes. Once complete, the Function App runs every 15 minutes and acts on any VMs that have the relevant tags.
 
-Each subscription requires its own installation. Installing into one subscription does not affect any other subscription.
+### Covering additional subscriptions
+
+One installed Function App can manage VMs across multiple subscriptions without installing again. Ask your Azure administrator to assign the Managed Identity (tagged `autoshutdown-mi-principal-id` on the Function App) the **Reader** and **Virtual Machine Contributor** roles on any additional subscription. The Function App will automatically include those subscriptions on its next run.
 
 ---
 
 ## How Schedules Work
 
-- The Function App runs every 15 minutes and checks all VMs in the subscription for `shutdown` and `startup` tags
-- If the current time (in the configured timezone) falls within the 15-minute window of the scheduled time, the VM is shut down or started
-- If a VM already has the desired power state, no action is taken
+- The Function App runs every 15 minutes
+- It uses a single Azure Resource Graph query to find all VMs with `shutdown` or `startup` tags across every subscription it has access to
+- VMs whose scheduled time falls within the current 15-minute window are shut down or started
+- VMs already in the desired power state are skipped
 - Changes you save in the app take effect within 15 minutes at most
 
 ---

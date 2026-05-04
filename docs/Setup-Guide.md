@@ -231,7 +231,22 @@ Click **Sign in with Microsoft** — a popup appears asking for consent. After s
 | Save Changes | For each modified VM, app calls the ARM Tags API to replace the tag set |
 | Return later | App always reads current tag values from Azure — it's stateless |
 
-Times are in **local time** as configured by the `TIMEZONE` app setting of the Function App deployed in each subscription (default: `Central European Standard Time`).
+Times are in **local time** as configured by the `TIMEZONE` app setting of the Function App (default: `Central European Standard Time`).
+
+---
+
+## Covering multiple subscriptions
+
+The Function App is installed once but can manage VMs across any number of subscriptions without reinstalling. For each additional subscription you want covered:
+
+1. Go to **Azure Portal** → the target subscription → **Access control (IAM)**
+2. Click **+ Add** → **Add role assignment**
+3. Assign **Reader** to the Managed Identity (`mi-autoshutdown` or as tagged on the Function App)
+4. Repeat for **Virtual Machine Contributor**
+
+The Function App uses Azure Resource Graph to discover all tagged VMs across every subscription its Managed Identity can access, so the new subscription is picked up automatically on the next run.
+
+To find the Managed Identity name: open the Function App in the portal → **Tags** → copy the value of `autoshutdown-mi-principal-id`, then look it up under **Entra ID** → **Managed identities**.
 
 ---
 
@@ -294,6 +309,7 @@ git push
 ## See also
 
 - [Multi-Tenant-Deployment.md](Multi-Tenant-Deployment.md) — deploying for a different or additional Azure AD tenant
+- [User-Guide.md](User-Guide.md) — end-user guide for navigating the app and setting schedules
 
 ---
 
