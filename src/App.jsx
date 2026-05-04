@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
-import { getSubscriptions, getResourceGroups, getVMs, updateVMTags, checkVMWritePermission } from './services/azure'
+import { getSubscriptions, getResourceGroups, getVMs, updateVMTags, patchVMTags } from './services/azure'
 import { detectInstallation } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
@@ -158,18 +158,16 @@ export default function App() {
     setError(null)
     try {
       const token = await getToken()
-      const canWrite = await checkVMWritePermission(token, vmId)
-      if (!canWrite) {
-        setError('You need Virtual Machine Contributor or Owner role on this VM to enroll it.')
-        return
-      }
       const vm = vms.find(v => v.id === vmId)
       const newTags = { ...(vm.tags ?? {}), 'autoshutdown-enrolled': 'true' }
-      await updateVMTags(token, vmId, newTags)
+      await patchVMTags(token, vmId, newTags)
       setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
       setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: true } }))
     } catch (e) {
-      setError(`Failed to enroll VM: ${e.message}`)
+      const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
+      setError(isAuthz
+        ? 'You need Virtual Machine Contributor or Owner role on this VM to enroll it.'
+        : `Failed to enroll VM: ${e.message}`)
     } finally {
       setEnrolling(prev => ({ ...prev, [vmId]: false }))
     }
@@ -185,11 +183,14 @@ export default function App() {
       for (const k of Object.keys(newTags)) {
         if (k.toLowerCase() === 'autoshutdown-enrolled') delete newTags[k]
       }
-      await updateVMTags(token, vmId, newTags)
+      await patchVMTags(token, vmId, newTags)
       setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
       setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: false } }))
     } catch (e) {
-      setError(`Failed to unenroll VM: ${e.message}`)
+      const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
+      setError(isAuthz
+        ? 'You need Virtual Machine Contributor or Owner role on this VM to unenroll it.'
+        : `Failed to unenroll VM: ${e.message}`)
     } finally {
       setEnrolling(prev => ({ ...prev, [vmId]: false }))
     }
