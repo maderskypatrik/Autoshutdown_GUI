@@ -3,26 +3,24 @@
     Auto-shutdown Azure Function — shuts down tagged VMs across all accessible subscriptions.
 
 .DESCRIPTION
-    Runs every 15 minutes. Iterates every subscription the Managed Identity has access to.
-    In each subscription, checks every VM's "shutdown" tag value (expected format: HH:mm local time).
-    If the current local time falls within the 15-minute window starting at that time, the VM is
-    deallocated. Each VM can carry a different shutdown time.
+    Runs every 15 minutes. Uses a single Resource Graph query to discover all VMs with a
+    "shutdown" tag across every accessible subscription, filters to those in the current
+    time window, then deallocates only those VMs. Scales to any number of subscriptions.
 
     Tag format:
       shutdown = 18:30   →  VM is deallocated at 18:30 local time (per TIMEZONE app setting)
-      shutdown = 21:00   →  VM is deallocated at 21:00 local time (per TIMEZONE app setting)
 
     Skips:
       - VMs tagged "donotshutdown" (any value, case-insensitive)
       - VMs whose tag value is missing or not a valid HH:mm time
       - VMs outside the current 15-minute window
-      - VMs already deallocated
+      - VMs already deallocated / powered off
 
     App settings:
       USER_ASSIGNED_MI_CLIENT_ID  — Client ID of the User-Assigned MI
       WHATIF                      — Set to "true" to log actions without executing them
-      WINDOW_MINUTES              — Match window in minutes (default: 15, matches the trigger interval)
-      TIMEZONE                    — Windows timezone ID for tag evaluation (default: UTC, e.g. "Central European Standard Time")
+      WINDOW_MINUTES              — Match window in minutes (default: 15)
+      TIMEZONE                    — Windows timezone ID (default: UTC)
 #>
 
 param($Timer)
@@ -37,281 +35,177 @@ $Now           = [TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $Tz)
 
 function Write-Log {
     param ([string]$Message, [string]$Level = "INFO")
-    $timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    Write-Host "[$timestamp][$Level] $Message"
-}
-
-function Test-Tag {
-    param ([hashtable]$Tags, [string]$TagKey)
-    if (-not $Tags) { return $false }
-    return ($Tags.Keys | Where-Object { $_ -ieq $TagKey }).Count -gt 0
-}
-
-function Get-TagValue {
-    param ([hashtable]$Tags, [string]$TagKey)
-    if (-not $Tags) { return $null }
-    $key = $Tags.Keys | Where-Object { $_ -ieq $TagKey } | Select-Object -First 1
-    if ($key) { return $Tags[$key] }
-    return $null
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Level] $Message"
 }
 
 function Test-InWindow {
     param ([string]$TagValue, [DateTime]$Now, [int]$WindowMinutes)
     if ([string]::IsNullOrWhiteSpace($TagValue)) { return $false }
     if ($TagValue -notmatch '^\d{1,2}:\d{2}$') { return $false }
-    $parts  = $TagValue -split ':'
-    $hour   = [int]$parts[0]
-    $minute = [int]$parts[1]
-    if ($hour -lt 0 -or $hour -gt 23 -or $minute -lt 0 -or $minute -gt 59) { return $false }
-    $target = $Now.Date.AddHours($hour).AddMinutes($minute)
+    $parts = $TagValue -split ':'
+    $h = [int]$parts[0]; $m = [int]$parts[1]
+    if ($h -lt 0 -or $h -gt 23 -or $m -lt 0 -or $m -gt 59) { return $false }
+    $target = $Now.Date.AddHours($h).AddMinutes($m)
     return ($Now -ge $target -and $Now -lt $target.AddMinutes($WindowMinutes))
+}
+
+function Get-ObjTagValue {
+    param ($Tags, [string]$Key)
+    if (-not $Tags) { return $null }
+    $prop = $Tags.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
+    return $prop?.Value
+}
+
+function Test-ObjTag {
+    param ($Tags, [string]$Key)
+    if (-not $Tags) { return $false }
+    return ($Tags.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
 }
 
 #endregion
 
 Write-Log "Auto-Shutdown triggered. Local=$($Now.ToString('HH:mm')) TZ=$TimeZoneId WhatIf=$WhatIf Window=${WindowMinutes}min"
 
-#region ── Subscription enumeration ─────────────────────────────────────────────
+#region ── Resource Graph discovery ─────────────────────────────────────────────
 
 try {
-    $subscriptions = @(Get-AzSubscription -ErrorAction Stop)
+    Import-Module Az.ResourceGraph -ErrorAction Stop
 } catch {
-    Write-Log "Failed to list subscriptions: $_" "ERROR"
+    Write-Log "Az.ResourceGraph module is required but could not be loaded." "ERROR"
     throw
 }
 
-Write-Log "Found $($subscriptions.Count) accessible subscription(s)."
-
-#endregion
-
-#region ── Total counters ───────────────────────────────────────────────────────
-
-$total = @{
-    Evaluated            = 0
-    ShutDown             = 0
-    SkippedDoNotShutdown = 0
-    SkippedNoTag         = 0
-    SkippedInvalidTime   = 0
-    SkippedOutsideWindow = 0
-    SkippedAlreadyOff    = 0
-    Errors               = 0
-}
-
-#endregion
-
-foreach ($sub in $subscriptions) {
-
-    Set-AzContext -SubscriptionId $sub.Id -ErrorAction Stop | Out-Null
-    $subId   = $sub.Id
-    $subName = $sub.Name
-
-    Write-Log "══════════════════════════════════════════════"
-    Write-Log "Processing subscription: $subName ($subId)"
-    Write-Log "══════════════════════════════════════════════"
-
-    $stats = @{
-        Evaluated            = 0
-        ShutDown             = 0
-        SkippedDoNotShutdown = 0
-        SkippedNoTag         = 0
-        SkippedInvalidTime   = 0
-        SkippedOutsideWindow = 0
-        SkippedAlreadyOff    = 0
-        Errors               = 0
-    }
-
-    #region ── 1. Classic Azure VMs ─────────────────────────────────────────────
-
-    Write-Log "──────────────────────────────────────────────"
-    Write-Log "Fetching classic Azure VMs..."
-
-    try {
-        $classicVMs = Get-AzVM -Status -ErrorAction Stop
-    } catch {
-        Write-Log "Failed to list classic VMs: $_" "ERROR"
-        $stats.Errors++
-        $classicVMs = @()
-    }
-
-    foreach ($vm in $classicVMs) {
-
-        $stats.Evaluated++
-        $name = $vm.Name
-        $rg   = $vm.ResourceGroupName
-        $tags = $vm.Tags
-
-        Write-Log "Evaluating classic VM: $name (RG: $rg)"
-
-        if (Test-Tag -Tags $tags -TagKey "donotshutdown") {
-            Write-Log "  SKIP — tagged 'donotshutdown'."
-            $stats.SkippedDoNotShutdown++
-            continue
-        }
-
-        if (-not (Test-Tag -Tags $tags -TagKey "shutdown")) {
-            Write-Log "  SKIP — no 'shutdown' tag."
-            $stats.SkippedNoTag++
-            continue
-        }
-
-        $tagValue = Get-TagValue -Tags $tags -TagKey "shutdown"
-
-        if ([string]::IsNullOrWhiteSpace($tagValue) -or $tagValue -notmatch '^\d{1,2}:\d{2}$') {
-            Write-Log "  SKIP — 'shutdown' tag value '$tagValue' is not a valid HH:mm time." "WARN"
-            $stats.SkippedInvalidTime++
-            continue
-        }
-
-        if (-not (Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)) {
-            Write-Log "  SKIP — shutdown time '$tagValue' not in current window ($($Now.ToString('HH:mm')) local)."
-            $stats.SkippedOutsideWindow++
-            continue
-        }
-
-        $powerState = ($vm.Statuses | Where-Object { $_.Code -like "PowerState/*" }).DisplayStatus
-        if ($powerState -eq "VM deallocated") {
-            Write-Log "  SKIP — already deallocated."
-            $stats.SkippedAlreadyOff++
-            continue
-        }
-
-        if ($WhatIf) {
-            Write-Log "  [WHATIF] Would stop (deallocate) classic VM: $name (shutdown=$tagValue local)"
-        } else {
-            Write-Log "  ACTION — Stopping (deallocating) classic VM: $name (shutdown=$tagValue local) ..."
-            try {
-                Stop-AzVM -ResourceGroupName $rg -Name $name -Force -ErrorAction Stop | Out-Null
-                Write-Log "  SUCCESS — VM $name deallocated."
-                $stats.ShutDown++
-            } catch {
-                Write-Log "  ERROR   — Failed to stop VM $name : $_" "ERROR"
-                $stats.Errors++
-            }
-        }
-    }
-
-    #endregion
-
-    #region ── 2. Azure Local VMs ───────────────────────────────────────────────
-
-    Write-Log "Fetching Azure Local VMs (Microsoft.AzureStackHCI/virtualMachineInstances)..."
-
-    $localVMs       = @()
-    $graphAvailable = $false
-
-    try {
-        Import-Module Az.ResourceGraph -ErrorAction Stop
-        $graphAvailable = $true
-    } catch {
-        Write-Log "Az.ResourceGraph could not be loaded — Azure Local VM query skipped." "WARN"
-    }
-
-    if ($graphAvailable) {
-        try {
-            $localVMs = Search-AzGraph -Query @"
+$query = @"
 Resources
-| where subscriptionId == '$subId'
-| where type =~ 'microsoft.azurestackhci/virtualmachineinstances'
-| project id, name, resourceGroup, tags, properties
-"@ -ErrorAction Stop
-        } catch {
-            Write-Log "Failed to query Azure Local VMs: $_" "WARN"
-            $localVMs = @()
-        }
+| where type =~ 'microsoft.compute/virtualmachines'
+    or type =~ 'microsoft.azurestackhci/virtualmachineinstances'
+| where isnotnull(tags.shutdown)
+| project
+    id, name, resourceGroup, subscriptionId, type, tags,
+    powerState = iff(
+        type =~ 'microsoft.compute/virtualmachines',
+        tostring(properties.extended.instanceView.powerState.displayStatus),
+        tostring(properties.instanceView.powerState)
+    )
+"@
+
+$allTaggedVMs = [System.Collections.Generic.List[object]]::new()
+try {
+    $result = Search-AzGraph -Query $query -First 1000 -ErrorAction Stop
+    $allTaggedVMs.AddRange([object[]]@($result))
+    while ($result.SkipToken) {
+        $result = Search-AzGraph -Query $query -First 1000 -SkipToken $result.SkipToken -ErrorAction Stop
+        $allTaggedVMs.AddRange([object[]]@($result))
     }
+} catch {
+    Write-Log "Resource Graph query failed: $_" "ERROR"
+    throw
+}
 
-    foreach ($lvm in $localVMs) {
+Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'shutdown' tag across all subscriptions."
 
-        $stats.Evaluated++
-        $name = $lvm.name
-        $rg   = $lvm.resourceGroup
-        $id   = $lvm.id
-        $tags = $lvm.tags
+#endregion
 
-        Write-Log "Evaluating Azure Local VM: $name (RG: $rg)"
+#region ── In-memory filtering ───────────────────────────────────────────────────
 
-        $tagsHT = @{}
-        if ($tags) {
-            $tags.PSObject.Properties | ForEach-Object { $tagsHT[$_.Name] = $_.Value }
-        }
+$toShutdown = $allTaggedVMs | Where-Object {
+    if (Test-ObjTag -Tags $_.tags -Key 'donotshutdown') {
+        Write-Log "  SKIP $($_.name) — tagged 'donotshutdown'."
+        return $false
+    }
+    $tagValue = Get-ObjTagValue -Tags $_.tags -Key 'shutdown'
+    if (-not (Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)) {
+        return $false
+    }
+    return $true
+}
 
-        if (Test-Tag -Tags $tagsHT -TagKey "donotshutdown") {
-            Write-Log "  SKIP — tagged 'donotshutdown'."
-            $stats.SkippedDoNotShutdown++
-            continue
-        }
+Write-Log "$(@($toShutdown).Count) VM(s) are in the current shutdown window."
 
-        if (-not (Test-Tag -Tags $tagsHT -TagKey "shutdown")) {
-            Write-Log "  SKIP — no 'shutdown' tag."
-            $stats.SkippedNoTag++
-            continue
-        }
+#endregion
 
-        $tagValue = Get-TagValue -Tags $tagsHT -TagKey "shutdown"
+#region ── Act ───────────────────────────────────────────────────────────────────
 
-        if ([string]::IsNullOrWhiteSpace($tagValue) -or $tagValue -notmatch '^\d{1,2}:\d{2}$') {
-            Write-Log "  SKIP — 'shutdown' tag value '$tagValue' is not a valid HH:mm time." "WARN"
-            $stats.SkippedInvalidTime++
-            continue
-        }
+$stats = @{ ShutDown = 0; SkippedAlreadyOff = 0; Errors = 0 }
 
-        if (-not (Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)) {
-            Write-Log "  SKIP — shutdown time '$tagValue' not in current window ($($Now.ToString('HH:mm')) local)."
-            $stats.SkippedOutsideWindow++
-            continue
-        }
+$grouped = @($toShutdown | Group-Object subscriptionId)
+foreach ($group in $grouped) {
 
-        $powerState = $lvm.properties.instanceView.powerState
-        if ($powerState -eq "Off" -or $powerState -eq "Stopped") {
-            Write-Log "  SKIP — already powered off (state: $powerState)."
-            $stats.SkippedAlreadyOff++
-            continue
-        }
+    Set-AzContext -SubscriptionId $group.Name -ErrorAction Stop | Out-Null
+    Write-Log "══ Subscription: $($group.Name) — $($group.Count) VM(s) to process"
 
-        if ($WhatIf) {
-            Write-Log "  [WHATIF] Would stop Azure Local VM: $name (shutdown=$tagValue local)"
+    foreach ($vm in $group.Group) {
+
+        $name     = $vm.name
+        $rg       = $vm.resourceGroup
+        $tagValue = Get-ObjTagValue -Tags $vm.tags -Key 'shutdown'
+        $isLocal  = $vm.type -ilike '*azurestackhci*'
+
+        Write-Log "  $name (RG: $rg) shutdown=$tagValue type=$(if ($isLocal) { 'AzureLocal' } else { 'AzureVM' })"
+
+        if ($isLocal) {
+
+            $powerState = $vm.powerState
+            if ($powerState -eq 'Off' -or $powerState -eq 'Stopped') {
+                Write-Log "    SKIP — already off (state: $powerState)."
+                $stats.SkippedAlreadyOff++
+                continue
+            }
+            if ($WhatIf) {
+                Write-Log "    [WHATIF] Would stop Azure Local VM: $name"
+            } else {
+                try {
+                    $token  = [System.Net.NetworkCredential]::new('', (Get-AzAccessToken -ResourceUrl 'https://management.azure.com').Token).Password
+                    $apiUri = "https://management.azure.com$($vm.id)/stop?api-version=2023-09-01-preview"
+                    Invoke-RestMethod -Uri $apiUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                    Write-Log "    SUCCESS — Azure Local VM $name stop request accepted."
+                    $stats.ShutDown++
+                } catch {
+                    Write-Log "    ERROR — $_ " "ERROR"
+                    $stats.Errors++
+                }
+            }
+
         } else {
-            Write-Log "  ACTION — Stopping Azure Local VM: $name (shutdown=$tagValue local) ..."
-            try {
-                $token  = [System.Net.NetworkCredential]::new('', (Get-AzAccessToken -ResourceUrl "https://management.azure.com").Token).Password
-                $apiUri = "https://management.azure.com$($id)/stop?api-version=2023-09-01-preview"
-                Invoke-RestMethod -Uri $apiUri -Method POST `
-                    -Headers @{ Authorization = "Bearer $token" } `
-                    -ContentType "application/json" -ErrorAction Stop | Out-Null
-                Write-Log "  SUCCESS — Azure Local VM $name stop request accepted."
-                $stats.ShutDown++
-            } catch {
-                Write-Log "  ERROR   — Failed to stop Azure Local VM $name : $_" "ERROR"
-                $stats.Errors++
+
+            $powerState = $vm.powerState
+            if ($powerState -eq 'VM deallocated') {
+                Write-Log "    SKIP — already deallocated."
+                $stats.SkippedAlreadyOff++
+                continue
+            }
+            if ($WhatIf) {
+                Write-Log "    [WHATIF] Would stop (deallocate) VM: $name"
+            } else {
+                try {
+                    Stop-AzVM -ResourceGroupName $rg -Name $name -Force -ErrorAction Stop | Out-Null
+                    Write-Log "    SUCCESS — VM $name deallocated."
+                    $stats.ShutDown++
+                } catch {
+                    Write-Log "    ERROR — $_" "ERROR"
+                    $stats.Errors++
+                }
             }
         }
     }
-
-    #endregion
-
-    Write-Log "Subscription summary — $subName : Evaluated=$($stats.Evaluated) ShutDown=$($stats.ShutDown) Errors=$($stats.Errors)"
-
-    foreach ($key in $stats.Keys) { $total[$key] += $stats[$key] }
 }
 
-#region ── Total summary ────────────────────────────────────────────────────────
+#endregion
+
+#region ── Summary ──────────────────────────────────────────────────────────────
 
 Write-Log "══════════════════════════════════════════════"
-Write-Log "TOTAL SUMMARY  ($TimeZoneId $($Now.ToString('HH:mm')))"
+Write-Log "RUN SUMMARY  ($TimeZoneId $($Now.ToString('HH:mm')))"
 Write-Log "══════════════════════════════════════════════"
-Write-Log "Subscriptions processed  : $($subscriptions.Count)"
-Write-Log "VMs evaluated            : $($total.Evaluated)"
-Write-Log "VMs shut down            : $($total.ShutDown)"
-Write-Log "Skipped (donotshutdown)  : $($total.SkippedDoNotShutdown)"
-Write-Log "Skipped (no tag)         : $($total.SkippedNoTag)"
-Write-Log "Skipped (invalid time)   : $($total.SkippedInvalidTime)"
-Write-Log "Skipped (outside window) : $($total.SkippedOutsideWindow)"
-Write-Log "Skipped (already off)    : $($total.SkippedAlreadyOff)"
-Write-Log "Errors                   : $($total.Errors)"
+Write-Log "VMs with shutdown tag    : $($allTaggedVMs.Count)"
+Write-Log "VMs in window            : $(@($toShutdown).Count)"
+Write-Log "VMs shut down            : $($stats.ShutDown)"
+Write-Log "Skipped (already off)    : $($stats.SkippedAlreadyOff)"
+Write-Log "Errors                   : $($stats.Errors)"
 Write-Log "══════════════════════════════════════════════"
 
-if ($total.Errors -gt 0) {
-    throw "Auto-Shutdown completed with $($total.Errors) error(s). Review logs above."
+if ($stats.Errors -gt 0) {
+    throw "Auto-Shutdown completed with $($stats.Errors) error(s). Review logs above."
 }
 
 #endregion
