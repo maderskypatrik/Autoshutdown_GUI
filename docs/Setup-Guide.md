@@ -261,13 +261,14 @@ To find the Managed Identity name: open the Function App in the portal → **Tag
 | What the user wants to do | Minimum required role |
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
-| Enroll or unenroll a VM | **Virtual Machine Contributor** or **Owner** on the VM |
-| Set or change shutdown / startup times | **Tag Contributor**, **Contributor**, or **Owner** on the subscription or resource group |
+| Set or change shutdown / startup times | **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM |
+| Exclude a VM from shutdown or startup | Same as above |
+| Enroll or unenroll a VM | Same as above |
 | Install the AutoShutdown solution | **Owner** on the subscription |
 
 Users with only Reader access can see VMs and their enrollment status but cannot make any changes.
 
-Users with Tag Contributor can set schedule times but cannot enroll VMs — the Function App will ignore unenlrolled VMs regardless of tags.
+All write operations (schedule times, exclude flags, enroll, unenroll) go through the Azure VM API, which enforces `Microsoft.Compute/virtualMachines/write`. Tag Contributor alone is not sufficient.
 
 ---
 

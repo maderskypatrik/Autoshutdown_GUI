@@ -18,12 +18,12 @@ Your access level determines what you can do in the app.
 | What you want to do | Minimum required role |
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
-| Enroll or unenroll a VM | **Virtual Machine Contributor** or **Owner** on the VM |
-| Set or change shutdown / startup times | **Tag Contributor**, **Contributor**, or **Owner** on the subscription or resource group |
+| Set or change shutdown / startup times | **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM |
 | Exclude a VM from shutdown or startup | Same as above |
+| Enroll or unenroll a VM | Same as above |
 | Install the AutoShutdown solution into a subscription | **Owner** on the subscription |
 
-> If you can see VMs but the **Save Changes** button stays disabled, you likely have Reader access only. Contact your Azure administrator to request Tag Contributor or higher.
+> If you can see VMs but cannot save changes or enroll VMs, you have Reader access only. Contact your Azure administrator to request Virtual Machine Contributor or higher.
 
 ---
 
@@ -157,8 +157,8 @@ You do not have Reader access to any subscription. Contact your Azure administra
 ### VMs do not appear after clicking Load VMs
 You may not have access to the selected resource group. Try selecting **All** in the Resource Group dropdown, or contact your administrator.
 
-### Save Changes button is disabled
-You have read-only access (Reader role). You need Tag Contributor, Contributor, or Owner to write tags. Contact your administrator.
+### Save Changes fails or Enroll button shows an error
+You do not have sufficient permissions. All modifications require **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM. Contact your Azure administrator.
 
 ### VM did not shut down or start at the scheduled time
 - Confirm the time was saved correctly — reload the page and check the value still appears
