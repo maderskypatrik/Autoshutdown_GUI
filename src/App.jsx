@@ -235,7 +235,10 @@ export default function App() {
           await updateVMTags(token, vm.id, newTags)
           saved.push({ vmId: vm.id, newTags })
         } catch (err) {
-          errors.push(`${vm.name}: ${err.message}`)
+          const isAuthz = err.message.includes('403') || err.message.toLowerCase().includes('authorization')
+          errors.push(isAuthz
+            ? `${vm.name}: You need Tag Contributor, Contributor, or Owner to save schedule changes.`
+            : `${vm.name}: ${err.message}`)
         }
       }
       if (saved.length > 0) {
