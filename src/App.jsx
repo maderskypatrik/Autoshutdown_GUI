@@ -166,7 +166,7 @@ export default function App() {
     } catch (e) {
       const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
       setError(isAuthz
-        ? 'You need Virtual Machine Contributor or Owner role on this VM to enroll it.'
+        ? 'You need Owner, Contributor, or Virtual Machine Contributor role on this VM to enroll it.'
         : `Failed to enroll VM: ${e.message}`)
     } finally {
       setEnrolling(prev => ({ ...prev, [vmId]: false }))
@@ -189,7 +189,7 @@ export default function App() {
     } catch (e) {
       const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
       setError(isAuthz
-        ? 'You need Virtual Machine Contributor or Owner role on this VM to unenroll it.'
+        ? 'You need Owner, Contributor, or Virtual Machine Contributor role on this VM to unenroll it.'
         : `Failed to unenroll VM: ${e.message}`)
     } finally {
       setEnrolling(prev => ({ ...prev, [vmId]: false }))
@@ -237,7 +237,7 @@ export default function App() {
         } catch (err) {
           const isAuthz = err.message.includes('403') || err.message.toLowerCase().includes('authorization')
           errors.push(isAuthz
-            ? `${vm.name}: You need VM Contributor, Contributor, or Owner to save schedule changes.`
+            ? `${vm.name}: You need Owner, Contributor, or Virtual Machine Contributor to save schedule changes.`
             : `${vm.name}: ${err.message}`)
         }
       }
