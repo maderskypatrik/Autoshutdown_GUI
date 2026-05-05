@@ -39,7 +39,8 @@ export async function getVMs(token, subId, rg = null) {
   let query = `Resources
 | where type =~ 'microsoft.compute/virtualmachines'`
   if (rg) query += `\n| where resourceGroup =~ '${rg}'`
-  query += `\n| project id, name, resourceGroup, tags, location
+  query += `\n| project id, name, resourceGroup, tags, location,
+    powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
 | order by name asc`
 
   const data = await armFetch(

@@ -183,8 +183,8 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
-.table-count     { font-size: 13px; color: var(--gray-600); font-weight: 500; }
-.enrolled-count  { color: var(--green); font-weight: 600; }
+.table-count      { font-size: 13px; color: var(--gray-600); font-weight: 500; }
+.scheduled-count  { color: var(--blue); font-weight: 600; }
 .search-input {
   padding: 6px 10px;
   border: 1px solid var(--gray-300);
@@ -227,42 +227,10 @@ body {
 .td-name     { min-width: 180px; }
 .td-rg       { color: var(--gray-600); min-width: 140px; }
 .td-location { color: var(--gray-600); font-size: 12px; white-space: nowrap; }
+.td-status   { white-space: nowrap; }
 .td-time     { min-width: 115px; }
 .td-toggle   { white-space: nowrap; }
-.td-enroll   { white-space: nowrap; min-width: 160px; }
 .td-empty    { text-align: center; padding: 32px; color: var(--gray-400); }
-
-.enroll-cell { display: flex; align-items: center; gap: 8px; }
-
-.btn-enroll-sm {
-  padding: 2px 10px;
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: var(--radius);
-  cursor: pointer;
-  background: var(--white);
-  color: var(--green);
-  border: 1px solid var(--green);
-  white-space: nowrap;
-}
-.btn-enroll-sm:hover:not(:disabled)  { background: #dff6dd; }
-.btn-enroll-sm:disabled              { opacity: .5; cursor: not-allowed; }
-
-.btn-unenroll-sm {
-  padding: 2px 10px;
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: var(--radius);
-  cursor: pointer;
-  background: var(--white);
-  color: var(--gray-600);
-  border: 1px solid var(--gray-400);
-  white-space: nowrap;
-}
-.btn-unenroll-sm:hover:not(:disabled) { background: var(--gray-200); }
-.btn-unenroll-sm:disabled             { opacity: .5; cursor: not-allowed; }
 
 .vm-name { font-weight: 500; }
 
@@ -291,10 +259,12 @@ body {
 .toggle input { cursor: pointer; }
 
 /* ── Badges ─────────────────────────────────────────────────── */
-.badge          { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: .3px; }
-.badge-enrolled { background: #dff6dd; color: var(--green); }
-.badge-none     { background: var(--gray-200); color: var(--gray-600); }
-.badge-modified { background: #fff4ce; color: var(--orange); margin-left: 6px; }
+.badge                    { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: .3px; }
+.badge-modified           { background: #fff4ce; color: var(--orange); margin-left: 6px; }
+.badge-status-running     { background: #dff6dd; color: var(--green); }
+.badge-status-stopped     { background: var(--gray-200); color: var(--gray-600); }
+.badge-status-transitioning { background: #fff4ce; color: var(--orange); }
+.badge-status-unknown     { background: var(--gray-200); color: var(--gray-400); }
 
 /* ── Spinner ────────────────────────────────────────────────── */
 .spinner-wrap { display: flex; justify-content: center; padding: 56px; }

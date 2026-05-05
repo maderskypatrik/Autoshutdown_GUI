@@ -1,13 +1,13 @@
 # VM Auto-shutdown Manager — Setup Guide
 
 **PowerCloud Team · v1.1**
-**Last updated: 2026-05-04**
+**Last updated: 2026-05-05**
 
 ---
 
 ## Overview
 
-This guide walks you through the full setup from zero to a running web app. The app lets users log in with their Microsoft account, browse their Azure VMs, explicitly enroll VMs into automation, and set shutdown/startup schedules — directly from the browser with no backend or secrets required.
+This guide walks you through the full setup from zero to a running web app. The app lets users log in with their Microsoft account, browse their Azure VMs, and set shutdown/startup schedules — directly from the browser with no backend or secrets required.
 
 **What you will set up:**
 
@@ -225,11 +225,10 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 | Action | What happens |
 |---|---|
 | Sign in | MSAL.js authenticates with Entra ID and gets an ARM access token |
-| Load VMs | App calls Azure Resource Graph API with the user's token — returns all VM names, RGs, and current tags |
-| Enroll VM | App checks the user has VM Contributor or Owner on the VM via ARM permissions API, then sets `autoshutdown-enrolled: true` tag |
+| Load VMs | App calls Azure Resource Graph API with the user's token — returns all VM names, RGs, current tags, and power state |
 | Edit time | User types a time in `HH:mm` format — change is tracked locally, not saved yet |
 | Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
-| Save Changes | For each modified VM, app calls the ARM Tags API to replace the tag set |
+| Save Changes | For each modified VM, app calls the Azure VM PATCH API to update the tag set. If a shutdown or startup time is set, `autoshutdown-enrolled` is added automatically. If both times are cleared, it is removed. |
 | Function App | Every 15 minutes, queries Resource Graph for VMs that have **both** `autoshutdown-enrolled` and `shutdown`/`startup` tags, then acts only on those in the current time window |
 | Return later | App always reads current tag values from Azure — it is stateless |
 
@@ -237,7 +236,9 @@ Times are in **local time** as configured by the `TIMEZONE` app setting of the F
 
 ### VM enrollment security model
 
-The `autoshutdown-enrolled` tag acts as an explicit allowlist gate. A VM with a `shutdown` tag but without `autoshutdown-enrolled` is completely ignored by the Function App. This prevents users who have only Tag Contributor permissions from accidentally or intentionally enrolling VMs into the automation — enrollment requires VM Contributor or Owner, verified by the app at the time of enrollment.
+The `autoshutdown-enrolled` tag acts as an explicit allowlist gate at the Function App level. The UI manages it automatically — it is added when a schedule is saved and removed when both times are cleared. A VM with a `shutdown` tag but without `autoshutdown-enrolled` is completely ignored by the Function App.
+
+All tag writes go through the Azure VM PATCH API (`Microsoft.Compute/virtualMachines/write`), which Azure enforces server-side. Users with Tag Contributor role receive a 403 and cannot modify any VM schedules.
 
 ---
 
@@ -261,14 +262,13 @@ To find the Managed Identity name: open the Function App in the portal → **Tag
 | What the user wants to do | Minimum required role |
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
-| Set or change shutdown / startup times | **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM |
+| Set or change shutdown / startup times | **Owner**, **Contributor**, or **Virtual Machine Contributor** on the subscription, resource group, or VM |
 | Exclude a VM from shutdown or startup | Same as above |
-| Enroll or unenroll a VM | Same as above |
 | Install the AutoShutdown solution | **Owner** on the subscription |
 
-Users with only Reader access can see VMs and their enrollment status but cannot make any changes.
+Users with only Reader access can see VMs and their current power state but cannot make any changes.
 
-All write operations (schedule times, exclude flags, enroll, unenroll) go through the Azure VM API, which enforces `Microsoft.Compute/virtualMachines/write`. Tag Contributor alone is not sufficient.
+All write operations go through the Azure VM PATCH API, which enforces `Microsoft.Compute/virtualMachines/write`. Tag Contributor alone is not sufficient — users with only Tag Contributor will receive a permission error when attempting to save.
 
 ---
 
@@ -285,9 +285,9 @@ The `redirectUri` in `authConfig.js` must exactly match a URI registered in the 
 
 The signed-in user has no Reader access on any subscription. Ask a subscription Owner to assign the user at least **Reader** role.
 
-### "Failed to load VMs: HTTP 403" on save
+### Save Changes fails with a permission error
 
-The user can read VMs but cannot write tags. Ask a subscription admin to assign **Tag Contributor** (or higher) on the relevant Resource Group or subscription.
+The user can read VMs but cannot write tags. Ask a subscription admin to assign **Owner**, **Contributor**, or **Virtual Machine Contributor** on the relevant subscription, resource group, or VM. Tag Contributor is not sufficient.
 
 ### GitHub Actions deployment fails
 

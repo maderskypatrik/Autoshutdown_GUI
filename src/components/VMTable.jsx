@@ -7,25 +7,33 @@ function isValidTime(v) {
   return TIME_RE.test(v)
 }
 
-function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
+function StatusBadge({ powerState }) {
+  if (!powerState) return <span className="badge badge-status-unknown">Unknown</span>
+  const s = powerState.toLowerCase()
+  if (s.includes('running'))    return <span className="badge badge-status-running">Running</span>
+  if (s.includes('deallocated') || s.includes('stopped')) return <span className="badge badge-status-stopped">Stopped</span>
+  return <span className="badge badge-status-transitioning">{powerState.replace(/^VM /i, '')}</span>
+}
+
+function VMRow({ vm, edit, onEdit, dirty }) {
   const badShutdown = !isValidTime(edit.shutdown)
   const badStartup  = !isValidTime(edit.startup)
 
   return (
     <tr className={dirty ? 'row-dirty' : ''}>
-      {/* VM Name */}
       <td className="td-name">
         <span className="vm-name">{vm.name}</span>
         {dirty && <span className="badge badge-modified">modified</span>}
       </td>
 
-      {/* Resource Group */}
       <td className="td-rg">{vm.resourceGroup}</td>
 
-      {/* Location */}
       <td className="td-location">{vm.location}</td>
 
-      {/* Shutdown time */}
+      <td className="td-status">
+        <StatusBadge powerState={vm.powerState} />
+      </td>
+
       <td className="td-time">
         <input
           type="text"
@@ -33,27 +41,24 @@ function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
           placeholder="HH:mm"
           value={edit.shutdown}
           onChange={e => onEdit(vm.id, 'shutdown', e.target.value)}
-          disabled={!edit.enrolled || edit.noShutdown}
+          disabled={edit.noShutdown}
           maxLength={5}
-          title={!edit.enrolled ? 'Enroll this VM first' : 'Shutdown time in HH:mm local time, e.g. 18:30. Leave empty to remove.'}
+          title="Shutdown time in HH:mm local time, e.g. 18:30. Leave empty to remove."
         />
         {badShutdown && <span className="field-error">Use HH:mm</span>}
       </td>
 
-      {/* Exclude from shutdown */}
       <td className="td-toggle">
-        <label className="toggle" title={!edit.enrolled ? 'Enroll this VM first' : 'Tag VM with donotshutdown — automation will skip it'}>
+        <label className="toggle" title="Tag VM with donotshutdown — automation will skip it">
           <input
             type="checkbox"
             checked={edit.noShutdown}
             onChange={e => onEdit(vm.id, 'noShutdown', e.target.checked)}
-            disabled={!edit.enrolled}
           />
           <span>Exclude</span>
         </label>
       </td>
 
-      {/* Startup time */}
       <td className="td-time">
         <input
           type="text"
@@ -61,59 +66,28 @@ function VMRow({ vm, edit, onEdit, dirty, onEnroll, onUnenroll, enrolling }) {
           placeholder="HH:mm"
           value={edit.startup}
           onChange={e => onEdit(vm.id, 'startup', e.target.value)}
-          disabled={!edit.enrolled || edit.noStart}
+          disabled={edit.noStart}
           maxLength={5}
-          title={!edit.enrolled ? 'Enroll this VM first' : 'Startup time in HH:mm local time, e.g. 07:00. Leave empty to remove.'}
+          title="Startup time in HH:mm local time, e.g. 07:00. Leave empty to remove."
         />
         {badStartup && <span className="field-error">Use HH:mm</span>}
       </td>
 
-      {/* Exclude from startup */}
       <td className="td-toggle">
-        <label className="toggle" title={!edit.enrolled ? 'Enroll this VM first' : 'Tag VM with donotstart — automation will skip it'}>
+        <label className="toggle" title="Tag VM with donotstart — automation will skip it">
           <input
             type="checkbox"
             checked={edit.noStart}
             onChange={e => onEdit(vm.id, 'noStart', e.target.checked)}
-            disabled={!edit.enrolled}
           />
           <span>Exclude</span>
         </label>
-      </td>
-
-      {/* Enrollment */}
-      <td className="td-enroll">
-        {edit.enrolled ? (
-          <div className="enroll-cell">
-            <span className="badge badge-enrolled">Enrolled</span>
-            <button
-              className="btn-unenroll-sm"
-              onClick={() => onUnenroll(vm.id)}
-              disabled={enrolling}
-              title="Remove this VM from the automation allowlist"
-            >
-              {enrolling ? '…' : 'Unenroll'}
-            </button>
-          </div>
-        ) : (
-          <div className="enroll-cell">
-            <span className="badge badge-none">Not enrolled</span>
-            <button
-              className="btn-enroll-sm"
-              onClick={() => onEnroll(vm.id)}
-              disabled={enrolling}
-              title="Enroll this VM — requires VM Contributor or Owner role"
-            >
-              {enrolling ? '…' : 'Enroll'}
-            </button>
-          </div>
-        )}
       </td>
     </tr>
   )
 }
 
-export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenroll, enrolling }) {
+export default function VMTable({ vms, edits, onEdit, isDirty }) {
   const [search, setSearch] = useState('')
 
   const filtered = vms.filter(vm =>
@@ -122,7 +96,7 @@ export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenr
     vm.resourceGroup.toLowerCase().includes(search.toLowerCase())
   )
 
-  const enrolledCount = vms.filter(vm => edits[vm.id]?.enrolled).length
+  const scheduledCount = vms.filter(vm => edits[vm.id]?.shutdown || edits[vm.id]?.startup).length
 
   return (
     <div className="table-wrap">
@@ -130,7 +104,7 @@ export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenr
         <span className="table-count">
           {vms.length} VM{vms.length !== 1 ? 's' : ''}
           &nbsp;&middot;&nbsp;
-          <span className="enrolled-count">{enrolledCount} enrolled</span>
+          <span className="scheduled-count">{scheduledCount} scheduled</span>
         </span>
         <input
           type="search"
@@ -148,9 +122,9 @@ export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenr
               <th rowSpan={2} className="th-first">VM Name</th>
               <th rowSpan={2}>Resource Group</th>
               <th rowSpan={2}>Location</th>
+              <th rowSpan={2}>Status</th>
               <th colSpan={2} className="th-group">Shutdown</th>
               <th colSpan={2} className="th-group">Startup</th>
-              <th rowSpan={2}>Enrollment</th>
             </tr>
             <tr className="th-sub">
               <th>Time</th>
@@ -169,12 +143,9 @@ export default function VMTable({ vms, edits, onEdit, isDirty, onEnroll, onUnenr
                 <VMRow
                   key={vm.id}
                   vm={vm}
-                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false, enrolled: false }}
+                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false }}
                   onEdit={onEdit}
                   dirty={isDirty(vm)}
-                  onEnroll={onEnroll}
-                  onUnenroll={onUnenroll}
-                  enrolling={!!enrolling[vm.id]}
                 />
               ))
             )}

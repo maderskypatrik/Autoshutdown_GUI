@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — User Guide
 
 **PowerCloud Team · v1.1**
-**Last updated: 2026-05-04**
+**Last updated: 2026-05-05**
 
 ---
 
@@ -62,6 +62,7 @@ Click the **Load VMs** button. The table below populates with all VMs found in t
 |---|---|
 | **VM Name** | The name of the virtual machine in Azure |
 | **Resource Group** | The resource group the VM belongs to |
+| **Status** | Current power state of the VM: **Running** or **Stopped** |
 | **Shutdown** | The daily shutdown time in `HH:mm` (24-hour) format |
 | **Startup** | The daily startup time in `HH:mm` (24-hour) format |
 | **Do Not Shutdown** | When checked, the VM is never shut down regardless of the shutdown time |
@@ -73,30 +74,16 @@ Times are interpreted in the timezone configured for the subscription's installa
 
 ---
 
-## Enrolling a VM
-
-Before the automation will act on a VM, it must be explicitly enrolled. This is a deliberate step that requires **VM Contributor or Owner** role on the VM — it cannot be done by someone with Tag Contributor alone.
-
-1. Find the VM in the table
-2. Click **Enroll** in the Enrollment column
-3. The app checks your permissions on that VM — if insufficient, an error is shown
-4. If permitted, the VM is marked as enrolled and the automation will process it
-
-To remove a VM from automation, click **Unenroll**. The VM's tags are preserved but the automation will no longer act on it.
-
----
-
 ## Setting a Schedule
 
-1. Enroll the VM first (see above) — the time and exclude fields are disabled until the VM is enrolled
-2. Click the **Shutdown** field and type a time in `HH:mm` format (e.g. `18:00`)
-3. Click the **Startup** field and type a time in `HH:mm` format (e.g. `07:00`)
-4. Rows with unsaved changes are highlighted — the footer shows how many VMs have pending changes
-5. Click **Save Changes**
+1. Click the **Shutdown** field and type a time in `HH:mm` format (e.g. `18:00`)
+2. Click the **Startup** field and type a time in `HH:mm` format (e.g. `07:00`)
+3. Rows with unsaved changes are highlighted — the footer shows how many VMs have pending changes
+4. Click **Save Changes**
 
 You can set only one of the two times if needed (e.g. auto-shutdown with no auto-startup).
 
-> Hovering over a disabled field on an unenrolled VM shows **"Enroll this VM first"**.
+Saving a schedule automatically enrolls the VM into the automation. Clearing both times and saving removes it from the automation. There is no separate enroll step.
 
 ---
 
@@ -165,6 +152,7 @@ You do not have sufficient permissions. All modifications require **Virtual Mach
 - Verify the AutoShutdown solution is installed in the subscription (a status indicator appears below the subscription selector)
 - Check that **Do Not Shutdown** / **Do Not Start** is not checked for that VM
 - The Function App runs every 15 minutes — allow up to 15 minutes after the scheduled time
+- If you only set **Do Not Shutdown** or **Do Not Start** without a time value, the VM is not enrolled in the automation — a schedule time must be saved for the VM to be processed
 
 ---
 

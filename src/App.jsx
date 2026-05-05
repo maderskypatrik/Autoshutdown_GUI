@@ -37,7 +37,6 @@ function vmToEdit(vm) {
     startup:    getTagCI(vm.tags, 'startup')    ?? '',
     noShutdown: hasTagCI(vm.tags, 'donotshutdown'),
     noStart:    hasTagCI(vm.tags, 'donotstart'),
-    enrolled:   hasTagCI(vm.tags, 'autoshutdown-enrolled'),
   }
 }
 
@@ -62,7 +61,6 @@ export default function App() {
   const [showInstallWizard, setShowInstallWizard] = useState(false)
   const [showUninstall,     setShowUninstall]     = useState(false)
   const [cachedToken,       setCachedToken]       = useState(null)
-  const [enrolling,         setEnrolling]         = useState({})
 
   const getToken = useCallback(async () => {
     try {
@@ -153,49 +151,6 @@ export default function App() {
     setSaveResult(null)
   }
 
-  const handleEnroll = async (vmId) => {
-    setEnrolling(prev => ({ ...prev, [vmId]: true }))
-    setError(null)
-    try {
-      const token = await getToken()
-      const vm = vms.find(v => v.id === vmId)
-      const newTags = { ...(vm.tags ?? {}), 'autoshutdown-enrolled': 'true' }
-      await patchVMTags(token, vmId, newTags)
-      setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
-      setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: true } }))
-    } catch (e) {
-      const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
-      setError(isAuthz
-        ? 'You need Owner, Contributor, or Virtual Machine Contributor role on this VM to enroll it.'
-        : `Failed to enroll VM: ${e.message}`)
-    } finally {
-      setEnrolling(prev => ({ ...prev, [vmId]: false }))
-    }
-  }
-
-  const handleUnenroll = async (vmId) => {
-    setEnrolling(prev => ({ ...prev, [vmId]: true }))
-    setError(null)
-    try {
-      const token = await getToken()
-      const vm = vms.find(v => v.id === vmId)
-      const newTags = { ...(vm.tags ?? {}) }
-      for (const k of Object.keys(newTags)) {
-        if (k.toLowerCase() === 'autoshutdown-enrolled') delete newTags[k]
-      }
-      await patchVMTags(token, vmId, newTags)
-      setVms(prev => prev.map(v => v.id === vmId ? { ...v, tags: newTags } : v))
-      setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], enrolled: false } }))
-    } catch (e) {
-      const isAuthz = e.message.includes('403') || e.message.toLowerCase().includes('authorization')
-      setError(isAuthz
-        ? 'You need Owner, Contributor, or Virtual Machine Contributor role on this VM to unenroll it.'
-        : `Failed to unenroll VM: ${e.message}`)
-    } finally {
-      setEnrolling(prev => ({ ...prev, [vmId]: false }))
-    }
-  }
-
   const isDirty = (vm) => {
     const e = edits[vm.id]
     if (!e) return false
@@ -222,7 +177,7 @@ export default function App() {
       for (const vm of dirtyVMs) {
         const e = edits[vm.id]
         let newTags = { ...(vm.tags ?? {}) }
-        for (const key of ['shutdown', 'startup', 'donotshutdown', 'donotstart']) {
+        for (const key of ['shutdown', 'startup', 'donotshutdown', 'donotstart', 'autoshutdown-enrolled']) {
           for (const k of Object.keys(newTags)) {
             if (k.toLowerCase() === key) delete newTags[k]
           }
@@ -231,6 +186,7 @@ export default function App() {
         if (e.startup)    newTags.startup       = e.startup
         if (e.noShutdown) newTags.donotshutdown = 'true'
         if (e.noStart)    newTags.donotstart    = 'true'
+        if (e.shutdown || e.startup) newTags['autoshutdown-enrolled'] = 'true'
         try {
           await patchVMTags(token, vm.id, newTags)
           saved.push({ vmId: vm.id, newTags })
@@ -250,11 +206,10 @@ export default function App() {
           const next = { ...prev }
           for (const { vmId, newTags } of saved) {
             next[vmId] = {
-              shutdown:   getTagCI(newTags, 'shutdown')           ?? '',
-              startup:    getTagCI(newTags, 'startup')            ?? '',
+              shutdown:   getTagCI(newTags, 'shutdown') ?? '',
+              startup:    getTagCI(newTags, 'startup')  ?? '',
               noShutdown: hasTagCI(newTags, 'donotshutdown'),
               noStart:    hasTagCI(newTags, 'donotstart'),
-              enrolled:   hasTagCI(newTags, 'autoshutdown-enrolled'),
             }
           }
           return next
@@ -308,9 +263,6 @@ export default function App() {
             edits={edits}
             onEdit={handleEdit}
             isDirty={isDirty}
-            onEnroll={handleEnroll}
-            onUnenroll={handleUnenroll}
-            enrolling={enrolling}
           />
         )}
 
