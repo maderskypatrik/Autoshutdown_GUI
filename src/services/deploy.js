@@ -156,7 +156,27 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const planId = planData.id
   log('App Service Plan created.', 'success')
 
-  // ── Step 4: Function App ───────────────────────────────────────────────────
+  // ── Step 4: Application Insights ──────────────────────────────────────────
+  log('Creating Application Insights...')
+  const aiName = `ai-${functionAppName}`
+  const aiData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/microsoft.insights/components/${aiName}?api-version=2020-02-02`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        kind: 'web',
+        tags: managedTags,
+        properties: { Application_Type: 'web' },
+      }),
+    }
+  )
+  const aiConnectionString    = aiData.properties.ConnectionString
+  const aiInstrumentationKey  = aiData.properties.InstrumentationKey
+  log('Application Insights created.', 'success')
+
+  // ── Step 5: Function App ───────────────────────────────────────────────────
   log(`Creating Function App: ${functionAppName}...`)
   const packageUrl = `${window.location.origin}/function-app.zip`
   await armFetch(
@@ -186,6 +206,8 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'FUNCTIONS_WORKER_RUNTIME',                value: 'powershell' },
               { name: 'WEBSITE_RUN_FROM_PACKAGE',                value: packageUrl },
               { name: 'USER_ASSIGNED_MI_CLIENT_ID',              value: miClientId },
+              { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING',   value: aiConnectionString },
+              { name: 'APPINSIGHTS_INSTRUMENTATIONKEY',          value: aiInstrumentationKey },
               { name: 'WHATIF',                                  value: 'false' },
               { name: 'WINDOW_MINUTES',                          value: '15' },
               { name: 'TIMEZONE',                                value: timezone },
@@ -300,5 +322,6 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
 function apiVersionFor(type) {
   const t = type.toLowerCase()
   if (t.includes('managedidentity')) return '2023-01-31'
+  if (t.includes('insights'))        return '2020-02-02'
   return '2023-01-01'
 }
