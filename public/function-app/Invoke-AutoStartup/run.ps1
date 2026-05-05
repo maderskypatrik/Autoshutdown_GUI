@@ -46,7 +46,8 @@ function Test-InWindow {
     $h = [int]$parts[0]; $m = [int]$parts[1]
     if ($h -lt 0 -or $h -gt 23 -or $m -lt 0 -or $m -gt 59) { return $false }
     $target = $Now.Date.AddHours($h).AddMinutes($m)
-    return ($Now -ge $target -and $Now -lt $target.AddMinutes($WindowMinutes))
+    # Allow 30s buffer: Azure timer triggers sometimes fire up to ~1s before the scheduled boundary
+    return ($Now -ge $target.AddSeconds(-30) -and $Now -lt $target.AddMinutes($WindowMinutes))
 }
 
 function Get-ObjTagValue {
