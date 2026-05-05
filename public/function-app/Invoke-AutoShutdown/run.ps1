@@ -53,14 +53,22 @@ function Test-InWindow {
 function Get-ObjTagValue {
     param ($Tags, [string]$Key)
     if (-not $Tags) { return $null }
-    $prop = $Tags.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
-    return $prop?.Value
+    # Search-AzGraph returns tags as a JObject; PSObject.Properties cannot enumerate it.
+    # JSON round-trip produces a true PSCustomObject with accessible NoteProperties.
+    try {
+        $t    = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
+        $prop = $t.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
+        return $prop?.Value
+    } catch { return $null }
 }
 
 function Test-ObjTag {
     param ($Tags, [string]$Key)
     if (-not $Tags) { return $false }
-    return ($Tags.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
+    try {
+        $t = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
+        return ($t.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
+    } catch { return $false }
 }
 
 #endregion

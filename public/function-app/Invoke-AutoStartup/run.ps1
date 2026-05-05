@@ -53,14 +53,22 @@ function Test-InWindow {
 function Get-ObjTagValue {
     param ($Tags, [string]$Key)
     if (-not $Tags) { return $null }
-    $prop = $Tags.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
-    return $prop?.Value
+    # Search-AzGraph returns tags as a JObject; PSObject.Properties cannot enumerate it.
+    # JSON round-trip produces a true PSCustomObject with accessible NoteProperties.
+    try {
+        $t    = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
+        $prop = $t.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
+        return $prop?.Value
+    } catch { return $null }
 }
 
 function Test-ObjTag {
     param ($Tags, [string]$Key)
     if (-not $Tags) { return $false }
-    return ($Tags.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
+    try {
+        $t = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
+        return ($t.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
+    } catch { return $false }
 }
 
 #endregion
@@ -110,21 +118,12 @@ Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'startup' tag acr
 
 #region ── In-memory filtering ───────────────────────────────────────────────────
 
-if ($allTaggedVMs.Count -gt 0) {
-    $s = $allTaggedVMs[0]
-    Write-Log "  DEBUG tags type : $($s.tags.GetType().FullName)"
-    Write-Log "  DEBUG tags raw  : $($s.tags | ConvertTo-Json -Compress -Depth 3)"
-    Write-Log "  DEBUG startup   : '$(Get-ObjTagValue -Tags $s.tags -Key 'startup')'"
-    Write-Log "  DEBUG now       : $($Now.ToString('HH:mm:ss.fff'))"
-}
-
 $toStart = $allTaggedVMs | Where-Object {
     if (Test-ObjTag -Tags $_.tags -Key 'donotstart') {
         Write-Log "  SKIP $($_.name) — tagged 'donotstart'."
         return $false
     }
     $tagValue = Get-ObjTagValue -Tags $_.tags -Key 'startup'
-    Write-Log "  CHECK $($_.name): startup='$tagValue' inWindow=$(Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)"
     if (-not (Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)) {
         return $false
     }
