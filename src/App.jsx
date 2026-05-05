@@ -174,7 +174,8 @@ export default function App() {
     const saved  = []
     try {
       const token = await getToken()
-      for (const vm of dirtyVMs) {
+
+      const saveVM = async (vm) => {
         const e = edits[vm.id]
         let newTags = { ...(vm.tags ?? {}) }
         for (const key of ['shutdown', 'startup', 'donotshutdown', 'donotstart', 'autoshutdown-enrolled']) {
@@ -196,6 +197,10 @@ export default function App() {
             ? `${vm.name}: You need Owner, Contributor, or Virtual Machine Contributor to save schedule changes.`
             : `${vm.name}: ${err.message}`)
         }
+      }
+
+      for (let i = 0; i < dirtyVMs.length; i += 5) {
+        await Promise.all(dirtyVMs.slice(i, i + 5).map(saveVM))
       }
       if (saved.length > 0) {
         setVms(prev => prev.map(v => {

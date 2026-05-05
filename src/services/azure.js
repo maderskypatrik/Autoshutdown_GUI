@@ -43,19 +43,22 @@ export async function getVMs(token, subId, rg = null) {
     powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
 | order by name asc`
 
-  const data = await armFetch(
-    token,
-    `${ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        query,
-        subscriptions: [subId],
-        options: { $top: 1000 },
-      }),
-    }
-  )
-  return data.data
+  const all = []
+  let skipToken = null
+  do {
+    const options = skipToken ? { $top: 1000, $skipToken: skipToken } : { $top: 1000 }
+    const data = await armFetch(
+      token,
+      `${ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ query, subscriptions: [subId], options }),
+      }
+    )
+    all.push(...(data.data ?? []))
+    skipToken = data.$skipToken ?? null
+  } while (skipToken)
+  return all
 }
 
 // Updates VM tags via the VM PATCH API, which requires Microsoft.Compute/virtualMachines/write.
