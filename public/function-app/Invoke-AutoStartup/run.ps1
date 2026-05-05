@@ -50,26 +50,6 @@ function Test-InWindow {
     return ($Now -ge $target.AddSeconds(-30) -and $Now -lt $target.AddMinutes($WindowMinutes))
 }
 
-function Get-ObjTagValue {
-    param ($Tags, [string]$Key)
-    if (-not $Tags) { return $null }
-    # Search-AzGraph returns tags as a JObject; PSObject.Properties cannot enumerate it.
-    # JSON round-trip produces a true PSCustomObject with accessible NoteProperties.
-    try {
-        $t    = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
-        $prop = $t.PSObject.Properties | Where-Object { $_.Name -ieq $Key } | Select-Object -First 1
-        return $prop?.Value
-    } catch { return $null }
-}
-
-function Test-ObjTag {
-    param ($Tags, [string]$Key)
-    if (-not $Tags) { return $false }
-    try {
-        $t = $Tags | ConvertTo-Json -Compress -Depth 5 | ConvertFrom-Json
-        return ($t.PSObject.Properties.Name | Where-Object { $_ -ieq $Key }).Count -gt 0
-    } catch { return $false }
-}
 
 #endregion
 
@@ -91,8 +71,10 @@ Resources
 | where isnotnull(tags.startup)
 | where isnotnull(tags['autoshutdown-enrolled'])
 | project
-    id, name, resourceGroup, subscriptionId, type, tags,
-    powerState = iff(
+    id, name, resourceGroup, subscriptionId, type,
+    startupTime = tostring(tags.startup),
+    doNotStart  = isnotnull(tags.donotstart),
+    powerState  = iff(
         type =~ 'microsoft.compute/virtualmachines',
         tostring(properties.extended.instanceView.powerState.displayStatus),
         tostring(properties.instanceView.powerState)
@@ -119,12 +101,11 @@ Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'startup' tag acr
 #region ── In-memory filtering ───────────────────────────────────────────────────
 
 $toStart = $allTaggedVMs | Where-Object {
-    if (Test-ObjTag -Tags $_.tags -Key 'donotstart') {
+    if ($_.doNotStart) {
         Write-Log "  SKIP $($_.name) — tagged 'donotstart'."
         return $false
     }
-    $tagValue = Get-ObjTagValue -Tags $_.tags -Key 'startup'
-    if (-not (Test-InWindow -TagValue $tagValue -Now $Now -WindowMinutes $WindowMinutes)) {
+    if (-not (Test-InWindow -TagValue $_.startupTime -Now $Now -WindowMinutes $WindowMinutes)) {
         return $false
     }
     return $true
@@ -148,7 +129,7 @@ foreach ($group in $grouped) {
 
         $name     = $vm.name
         $rg       = $vm.resourceGroup
-        $tagValue = Get-ObjTagValue -Tags $vm.tags -Key 'startup'
+        $tagValue = $vm.startupTime
         $isLocal  = $vm.type -ilike '*azurestackhci*'
 
         Write-Log "  $name (RG: $rg) startup=$tagValue type=$(if ($isLocal) { 'AzureLocal' } else { 'AzureVM' })"
