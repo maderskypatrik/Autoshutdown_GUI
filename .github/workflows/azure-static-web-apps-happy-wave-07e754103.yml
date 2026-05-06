@@ -35,6 +35,27 @@ jobs:
           output_location: "dist" # Built app content directory - optional
           ###### End of Repository/Build Configurations ######
 
+  update_function_apps:
+    needs: build_and_deploy_job
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    name: Update Function Apps
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Read version from package.json
+        id: version
+        run: echo "value=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update all Function Apps to v${{ steps.version.outputs.value }}
+        shell: pwsh
+        run: ./scripts/Update-FunctionApps.ps1 -Version "${{ steps.version.outputs.value }}"
+
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
