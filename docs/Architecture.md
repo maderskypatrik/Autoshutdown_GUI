@@ -1,6 +1,6 @@
 # VM Auto-shutdown Manager — Architecture
 
-**PowerCloud Team · Last updated: 2026-05-05**
+**PowerCloud Team · Last updated: 2026-05-06**
 
 ---
 
@@ -39,7 +39,12 @@ There is no backend API, no database, and no shared secrets. The browser calls A
 
 ### Hosting
 
-React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions. The `function-app.zip` (the Function App package) is also served as a static asset from the SWA at `/function-app.zip`.
+React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions. The SWA also serves two static assets used by the Function Apps:
+
+- `/function-app.zip` — the Function App package, deployed on every push to `main`
+- `/version.json` — current version string (e.g. `{"version":"1.1.0"}`), written by GitHub Actions before deploy
+
+Both files are generated automatically — no manual steps needed on release.
 
 ### Authentication
 
@@ -196,6 +201,29 @@ The Function App handles two VM types differently:
 | Azure VM | `microsoft.compute/virtualmachines` | `Stop-AzVM -Force` | `Start-AzVM` | `powerState == 'VM deallocated'` |
 | Azure Local (HCI) | `microsoft.azurestackhci/virtualmachineinstances` | REST `POST .../stop` | REST `POST .../start` | `powerState == 'Off' or 'Stopped'` |
 
+### Self-update mechanism
+
+Every Function App updates itself automatically when a new version is deployed — no central credential or cross-subscription access required.
+
+**On every timer invocation**, each `run.ps1` calls `Invoke-VersionCheck` (defined in `profile.ps1`) before doing any work:
+
+```
+Timer fires → Invoke-VersionCheck runs
+  1. Reads version.txt from inside the running zip  (e.g. "1.0.0")
+  2. Fetches {SWA_URL}/version.json  (e.g. {"version":"1.1.0"})
+  3. If versions match → returns false → normal processing continues
+  4. If mismatch → calls ARM restart API using own MI token → returns true
+     → run.ps1 exits early (one invocation skipped)
+     → Azure restarts the Function App and re-downloads the new zip
+     → Next invocation: version.txt = "1.1.0" → no mismatch → resumes normally
+```
+
+`version.json` is a public static file — no authentication needed to read it. The MI only calls the ARM restart API on itself, scoped to its own resource group.
+
+**Rollout time after a new deploy:** all Function Apps update within one 15-minute timer cycle, independently, with no central orchestration.
+
+**Note:** Function Apps installed with an older version of the installer (before `FUNCTION_APP_RESOURCE_ID` and Website Contributor were added) will not self-update. They must be restarted manually or via [scripts/Update-FunctionApps.ps1](../scripts/Update-FunctionApps.ps1) using credentials scoped to that specific subscription.
+
 ### Critical implementation note — tag reading
 
 `Search-AzGraph` returns the `tags` property as a Newtonsoft `JObject` wrapped in `PSCustomObject`. PowerShell's `PSObject.Properties` cannot enumerate JObject keys, so standard tag-reading patterns fail silently (always returning null).
@@ -274,9 +302,13 @@ Runs entirely in the browser using the user's token (must be Owner on subscripti
 6. Create Function App
    └── identity: UserAssigned (the MI from step 2)
    └── WEBSITE_RUN_FROM_PACKAGE: {SWA_URL}/function-app.zip
-   └── All app settings injected at creation time
+   └── VERSION: current app version (from package.json at build time)
+   └── FUNCTION_APP_RESOURCE_ID: own ARM resource ID (for self-restart)
+   └── All other app settings injected at creation time
 7. Assign Virtual Machine Contributor to MI at subscription scope
 8. Assign Reader to MI at subscription scope
+9. Assign Website Contributor to MI at resource group scope
+   └── Scoped to the RG only — allows MI to restart itself, nothing else
 ```
 
 All created resources are tagged `autoshutdown-managed=v3` for uninstall discovery. The Function App is also tagged with `autoshutdown-mi-principal-id` (the MI principal ID) so uninstall can remove the RBAC assignments.
@@ -302,8 +334,9 @@ Tag Contributor role cannot write VM tags via the VM PATCH API — Azure returns
 |---|---|---|
 | Reader | Subscription | Allows Resource Graph to return VMs in this subscription |
 | Virtual Machine Contributor | Subscription | Allows `Stop-AzVM` and `Start-AzVM` |
+| Website Contributor | Resource group (own RG only) | Allows MI to restart itself for self-update |
 
-For multi-subscription coverage without a second installation: assign these same two roles to the same MI on additional subscriptions. The Resource Graph query and cmdlets will automatically include those subscriptions on the next run.
+Each MI only has access to its own subscription and its own resource group — no cross-subscription permissions.
 
 ---
 
@@ -323,5 +356,7 @@ For multi-subscription coverage without a second installation: assign these same
 | `FUNCTIONS_EXTENSION_VERSION` | Installer | `~4` |
 | `FUNCTIONS_WORKER_RUNTIME` | Installer | `powershell` |
 | `WEBSITE_RUN_FROM_PACKAGE` | Installer | URL to `function-app.zip` on the Static Web App |
+| `VERSION` | Installer + GitHub Actions | Current version string — compared against `version.json` for self-update |
+| `FUNCTION_APP_RESOURCE_ID` | Installer | Own ARM resource ID — used by self-update to call the restart API |
 | `REPORT_SENDER` | Manual | Shared mailbox address for daily report emails |
 | `REPORT_RECIPIENT` | Manual | Recipient address(es) for daily report emails |

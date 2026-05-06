@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — Setup Guide
 
 **PowerCloud Team · v1.1**
-**Last updated: 2026-05-05**
+**Last updated: 2026-05-06**
 
 ---
 
@@ -230,6 +230,7 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 | Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
 | Save Changes | For each modified VM, app calls the Azure VM PATCH API to update the tag set. If a shutdown or startup time is set, `autoshutdown-enrolled` is added automatically. If both times are cleared, it is removed. |
 | Function App | Every 15 minutes, queries Resource Graph for VMs that have **both** `autoshutdown-enrolled` and `shutdown`/`startup` tags, then acts only on those in the current time window |
+| Self-update | On every invocation, each Function App compares its running version against `version.json` on the SWA. If a newer version is available it restarts itself using its own Managed Identity, forcing Azure to download the new zip. No central credential required. |
 | Return later | App always reads current tag values from Azure — it is stateless |
 
 Times are in **local time** as configured by the `TIMEZONE` app setting of the Function App (default: `Central European Standard Time`).
@@ -300,15 +301,27 @@ The app uses redirect-based login (no popup). If the sign-in loop repeats withou
 
 ---
 
-## Updating the app after code changes
+## Releasing a new version
 
-Any push to `main` triggers an automatic redeploy via GitHub Actions — no manual steps needed.
+### GUI changes (frontend only)
+
+Any push to `main` redeploys the SWA automatically via GitHub Actions — no manual steps needed.
 
 ```bash
 git add .
 git commit -m "your change"
 git push
 ```
+
+### Function App changes (PowerShell scripts)
+
+1. Make your changes to the scripts under `public/function-app/`
+2. Bump the version in `package.json` (e.g. `"version": "1.1.0"`)
+3. Commit and push to `main`
+
+GitHub Actions will write the new version into `version.txt` (baked into the zip) and `version.json` (served by the SWA). Within one 15-minute timer cycle, every installed Function App detects the mismatch, restarts itself, and downloads the new zip automatically.
+
+No access to individual subscriptions is required. The update happens independently in each subscription using only that subscription's own Managed Identity.
 
 ---
 
