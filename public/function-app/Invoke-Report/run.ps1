@@ -19,6 +19,8 @@
 
 param($Timer)
 
+if (Invoke-VersionCheck) { return }
+
 $WhatIf     = ($env:WHATIF -eq "true")
 $TimeZoneId = if ($env:TIMEZONE) { $env:TIMEZONE } else { "UTC" }
 $Sender     = $env:REPORT_SENDER

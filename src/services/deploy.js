@@ -5,8 +5,9 @@ const MANAGED_TAG_VAL = 'v3'
 const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
 
 // Role definition IDs (built-in, subscription-scope assignments)
-const ROLE_VM_CONTRIBUTOR = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
-const ROLE_READER         = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+const ROLE_VM_CONTRIBUTOR      = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
+const ROLE_READER              = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+const ROLE_WEBSITE_CONTRIBUTOR = 'de139f84-1756-47ae-9be6-808fbbe84772'
 
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
@@ -212,6 +213,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'WINDOW_MINUTES',                          value: '15' },
               { name: 'TIMEZONE',                                value: timezone },
               { name: 'VERSION',                                 value: __APP_VERSION__ },
+              { name: 'FUNCTION_APP_RESOURCE_ID',              value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
             ],
             powerShellVersion: '7.4',
             use32BitWorkerProcess: false,
@@ -224,21 +226,25 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   // ── Step 5: RBAC roles at subscription scope ───────────────────────────────
   log('Assigning Virtual Machine Contributor role...')
-  await assignRole(token, subId, miPrincipalId, ROLE_VM_CONTRIBUTOR)
+  await assignRole(token, subId, `/subscriptions/${subId}`, miPrincipalId, ROLE_VM_CONTRIBUTOR)
   log('VM Contributor role assigned.', 'success')
 
   log('Assigning Reader role...')
-  await assignRole(token, subId, miPrincipalId, ROLE_READER)
+  await assignRole(token, subId, `/subscriptions/${subId}`, miPrincipalId, ROLE_READER)
   log('Reader role assigned.', 'success')
+
+  log('Assigning Website Contributor role on resource group (for self-update)...')
+  await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_WEBSITE_CONTRIBUTOR)
+  log('Website Contributor role assigned.', 'success')
 
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
 }
 
-async function assignRole(token, subId, principalId, roleDefId) {
+async function assignRole(token, subId, scope, principalId, roleDefId) {
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments/${crypto.randomUUID()}?api-version=2022-04-01`,
+    `${ARM}${scope}/providers/Microsoft.Authorization/roleAssignments/${crypto.randomUUID()}?api-version=2022-04-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
