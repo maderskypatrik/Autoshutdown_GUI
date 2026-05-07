@@ -91,6 +91,16 @@ GitHub Actions builds and deploys. Users in the new tenant can now sign in and u
 
 ---
 
+## Troubleshooting
+
+### Installation fails with "HTTP 409"
+
+Function App names must be globally unique across all of Azure. If the name you entered is already taken (by another Azure customer or reserved from a previously deleted app), Azure returns HTTP 409.
+
+**Fix:** retry the installation with a more unique name, e.g. `func-autoshutdown-yourcompany` or `func-autoshutdown-abc`.
+
+---
+
 ## Running for multiple tenants simultaneously
 
 Because `authConfig.js` is baked into the build, one deployed instance = one tenant. To serve multiple tenants at the same time:

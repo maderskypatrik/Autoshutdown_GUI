@@ -290,6 +290,12 @@ The signed-in user has no Reader access on any subscription. Ask a subscription 
 
 The user can read VMs but cannot write tags. Ask a subscription admin to assign **Owner**, **Contributor**, or **Virtual Machine Contributor** on the relevant subscription, resource group, or VM. Tag Contributor is not sufficient.
 
+### Installation fails with "HTTP 409" on Function App creation
+
+Function App names must be globally unique across all of Azure. If the name you entered is already taken (by another Azure customer or reserved from a previously deleted app), Azure returns HTTP 409.
+
+**Fix:** retry the installation with a more unique name, e.g. `func-autoshutdown-yourcompany` or `func-autoshutdown-abc`.
+
 ### GitHub Actions deployment fails
 
 - Check that the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret is set correctly in GitHub → Settings → Secrets

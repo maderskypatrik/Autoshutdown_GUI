@@ -138,6 +138,12 @@ One installed Function App can manage VMs across multiple subscriptions without 
 
 ## Troubleshooting
 
+### Installation fails with "HTTP 409"
+
+Function App names must be globally unique across all of Azure. If the name you entered is already taken (by another Azure customer or reserved from a previously deleted app), Azure returns HTTP 409.
+
+**Fix:** retry the installation with a more unique name, e.g. `func-autoshutdown-yourcompany` or `func-autoshutdown-abc`.
+
 ### No subscriptions appear after signing in
 You do not have Reader access to any subscription. Contact your Azure administrator.
 
