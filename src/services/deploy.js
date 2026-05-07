@@ -115,7 +115,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         location,
         tags: managedTags,
         sku: { name: 'Standard_LRS' },
-        properties: { supportsHttpsTrafficOnly: true, minimumTlsVersion: 'TLS1_2' },
+        properties: { supportsHttpsTrafficOnly: true, minimumTlsVersion: 'TLS1_2', allowBlobPublicAccess: false },
       }),
     }
   )
