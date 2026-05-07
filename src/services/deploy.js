@@ -212,7 +212,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'WHATIF',                                  value: 'false' },
               { name: 'WINDOW_MINUTES',                          value: '15' },
               { name: 'TIMEZONE',                                value: timezone },
-              { name: 'VERSION',                                 value: __APP_VERSION__ },
+              { name: 'VERSION',                                 value: (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0') },
               { name: 'FUNCTION_APP_RESOURCE_ID',              value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
             ],
             powerShellVersion: '7.4',
