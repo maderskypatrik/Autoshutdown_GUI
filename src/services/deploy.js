@@ -77,6 +77,19 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const { resourceGroup, functionAppName, timezone } = config
   const log = (msg, level = 'info') => onLog({ msg, level })
 
+  const packageUrl = `${window.location.origin}/function-app.zip`
+  log('Verifying function-app.zip is reachable...')
+  try {
+    const probe = await fetch(packageUrl, { method: 'HEAD' })
+    if (!probe.ok || probe.redirected) throw new Error()
+  } catch {
+    throw new Error(
+      `Cannot reach ${packageUrl} — the app package is not deployed yet. ` +
+      `Wait for the GitHub Actions deployment to complete and try again.`
+    )
+  }
+  log('Package verified.', 'success')
+
   log('Reading resource group location...')
   const rgData = await armFetch(
     token,
@@ -179,7 +192,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   // ── Step 5: Function App ───────────────────────────────────────────────────
   log(`Creating Function App: ${functionAppName}...`)
-  const packageUrl = `${window.location.origin}/function-app.zip`
   await armFetch(
     token,
     `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-01-01`,
