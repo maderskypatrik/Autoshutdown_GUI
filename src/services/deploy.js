@@ -81,7 +81,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log('Verifying function-app.zip is reachable...')
   try {
     const probe = await fetch(packageUrl, { method: 'HEAD' })
-    if (!probe.ok || probe.redirected) throw new Error()
+    if (!probe.ok) throw new Error()
   } catch {
     throw new Error(
       `Cannot reach ${packageUrl} — the app package is not deployed yet. ` +
