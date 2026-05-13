@@ -44,7 +44,7 @@ body {
 
 /* ── Header ─────────────────────────────────────────────────── */
 .header {
-  background: var(--blue);
+  background: #212124;
   color: var(--white);
   display: flex;
   align-items: center;
@@ -56,16 +56,28 @@ body {
   z-index: 100;
   box-shadow: var(--shadow-sm);
 }
-.header-title {
-  font-size: 16px;
-  font-weight: 600;
+.header-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
 }
-.header-icon { font-size: 20px; }
+.header-wordmark {
+  height: 22px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+.header-divider {
+  width: 1px;
+  height: 20px;
+  background: #373739;
+}
+.header-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255,255,255,.7);
+}
 .header-user { display: flex; align-items: center; gap: 12px; }
-.header-username { font-size: 13px; color: var(--blue-light); }
+.header-username { font-size: 13px; color: rgba(255,255,255,.5); }
 
 /* ── Buttons ────────────────────────────────────────────────── */
 .btn {
@@ -82,15 +94,15 @@ body {
   transition: background .15s;
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary  { background: var(--blue); color: var(--white); border-color: var(--blue-dark); }
-.btn-primary:hover:not(:disabled) { background: var(--blue-dark); }
+.btn-primary  { background: #212124; color: var(--white); border-color: #111112; }
+.btn-primary:hover:not(:disabled) { background: #373739; }
 .btn-ghost    { background: transparent; color: var(--white); border-color: rgba(255,255,255,.3); }
 .btn-ghost:hover:not(:disabled)   { background: rgba(255,255,255,.15); }
 .btn-signin {
   display: block;
   width: 100%;
   padding: 12px;
-  background: var(--blue);
+  background: #212124;
   color: var(--white);
   border: none;
   border-radius: var(--radius);
@@ -100,7 +112,7 @@ body {
   cursor: pointer;
   transition: background .15s;
 }
-.btn-signin:hover { background: var(--blue-dark); }
+.btn-signin:hover { background: #373739; }
 
 /* ── Login page ─────────────────────────────────────────────── */
 .login-wrap {
@@ -108,19 +120,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--gray-100);
+  background: #F3F1E5;
 }
 .login-card {
   background: var(--white);
   border: 1px solid var(--gray-300);
   border-radius: 8px;
   padding: 48px 40px;
-  width: 420px;
+  width: 440px;
   text-align: center;
   box-shadow: var(--shadow-md);
 }
-.login-logo  { font-size: 48px; margin-bottom: 16px; }
-.login-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 12px; }
+.login-logo  { display: flex; justify-content: center; margin-bottom: 24px; }
+.login-logo-img { height: 32px; max-width: 100%; object-fit: contain; }
+.login-card h1 { font-size: 18px; font-weight: 600; color: #212124; margin-bottom: 12px; }
 .login-card > p { color: var(--gray-600); line-height: 1.6; margin-bottom: 28px; }
 .login-note { font-size: 12px; color: var(--gray-400); margin-top: 14px; }
 
@@ -331,8 +344,8 @@ body {
 .sub-status-not-installed { background: #fff9f0; border-color: #f0c060; color: var(--gray-800); }
 .sub-status-installed    { background: #dff6dd; border-color: #a3d9a0; color: var(--gray-800); }
 
-.btn-install   { margin-left: auto; background: var(--blue);  color: var(--white); border: 1px solid var(--blue-dark); border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
-.btn-install:hover   { background: var(--blue-dark); }
+.btn-install   { margin-left: auto; background: #212124; color: var(--white); border: 1px solid #111112; border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-install:hover   { background: #373739; }
 .btn-uninstall { margin-left: auto; background: var(--white); color: var(--red);   border: 1px solid var(--red);       border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .btn-uninstall:hover { background: #fde7e9; }
 .btn-danger    { background: var(--red); color: var(--white); border: 1px solid #a32218; border-radius: var(--radius); padding: 7px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
@@ -387,7 +400,7 @@ body {
   color: var(--gray-400);
   flex: 1;
 }
-.modal-step.active { color: var(--blue); font-weight: 600; }
+.modal-step.active { color: #212124; font-weight: 600; }
 .modal-step.done   { color: var(--green); }
 .step-num {
   width: 20px; height: 20px;
@@ -399,7 +412,7 @@ body {
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.modal-step.active .step-num { background: var(--blue);  color: var(--white); }
+.modal-step.active .step-num { background: #212124; color: var(--white); }
 .modal-step.done   .step-num { background: var(--green); color: var(--white); }
 
 .modal-body   { padding: 20px; overflow-y: auto; flex: 1; }

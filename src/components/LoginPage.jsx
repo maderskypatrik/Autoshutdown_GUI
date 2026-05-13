@@ -11,7 +11,9 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <div className="login-logo">&#9729;</div>
+        <div className="login-logo">
+          <img src="/powerco-wordmark.png" alt="PowerCo" className="login-logo-img" />
+        </div>
         <h1>VM Auto-shutdown Manager</h1>
         <p>
           Manage daily shutdown and startup schedules for your Azure VMs.<br />

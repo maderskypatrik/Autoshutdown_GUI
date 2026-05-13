@@ -5,9 +5,10 @@ export default function Header({ account }) {
 
   return (
     <header className="header">
-      <div className="header-title">
-        <span className="header-icon">&#9729;</span>
-        VM Auto-shutdown Manager
+      <div className="header-brand">
+        <img src="/powerco-wordmark.png" alt="PowerCo" className="header-wordmark" />
+        <div className="header-divider" />
+        <span className="header-title">VM Auto-shutdown Manager</span>
       </div>
       <div className="header-user">
         <span className="header-username">{account?.username}</span>
