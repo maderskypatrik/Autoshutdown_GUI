@@ -102,7 +102,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
                 </ul>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>
-                  <a href="/terms-of-use.md" target="_blank" rel="noreferrer">View full Terms of Use ↗</a>
+                  <a href="https://devstack.vwgroup.com/confluence/x/oN1ltgE" target="_blank" rel="noreferrer">View full Terms of Use ↗</a>
                 </p>
               </div>
               <label className="tou-agree">

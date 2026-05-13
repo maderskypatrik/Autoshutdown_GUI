@@ -1,4 +1,4 @@
-# VM Auto-shutdown V3 — Terms of Use
+# VM Auto-shutdown — Terms of Use
 
 **PowerCloud Team · v1.0 · Internal use only**
 **Last updated: 2026-04-29**

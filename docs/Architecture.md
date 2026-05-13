@@ -11,9 +11,9 @@ The solution has two independent layers that share data only through Azure VM ta
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Browser (React SPA)                                             │
-│  User authenticates via Entra ID → gets ARM access token        │
-│  Calls Azure ARM APIs directly with the user's own token        │
-│  Reads / writes VM tags                                         │
+│  User authenticates via Entra ID → gets ARM access token         │
+│  Calls Azure ARM APIs directly with the user's own token         │
+│  Reads / writes VM tags                                          │
 └──────────────────────┬───────────────────────────────────────────┘
                        │ ARM API (user's token)
                        ▼
@@ -27,7 +27,7 @@ The solution has two independent layers that share data only through Azure VM ta
 ┌──────────────────────────────────────────────────────────────────┐
 │  Azure Function App  (PowerShell, timer-triggered)               │
 │  Runs every 15 min — reads tags via Resource Graph               │
-│  Shuts down / starts up VMs independently of the browser        │
+│  Shuts down / starts up VMs independently of the browser         │
 └──────────────────────────────────────────────────────────────────┘
 ```
 

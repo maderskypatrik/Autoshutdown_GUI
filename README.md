@@ -1,0 +1,2 @@
+# Autoshutdown_GUI
+VM Auto-shutdown Manager lets users set daily shutdown and startup schedules for Azure Virtual Machines directly from the browser. Schedules are stored as tags on the VMs — no database, no backend. Each subscription gets its own isolated Function App that runs every 15 minutes and acts on tagged VMs. The Function App self-updates when a new version is deployed, with no central credentials or cross-subscription access required.
