@@ -6,7 +6,7 @@ export default function Header({ account }) {
   return (
     <header className="header">
       <div className="header-brand">
-        <img src="/powerco-wordmark.png" alt="PowerCo" className="header-wordmark" />
+        <img src="/brand_dark.svg" alt="PowerCo" className="header-logo-icon" />
         <div className="header-divider" />
         <span className="header-title">VM Auto-shutdown Manager</span>
       </div>

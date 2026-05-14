@@ -61,10 +61,21 @@ body {
   align-items: center;
   gap: 16px;
 }
-.header-wordmark {
-  height: 22px;
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.header-logo-icon {
+  height: 26px;
+  width: auto;
   object-fit: contain;
-  filter: brightness(0) invert(1);
+}
+.header-logo-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--white);
 }
 .header-divider {
   width: 1px;
