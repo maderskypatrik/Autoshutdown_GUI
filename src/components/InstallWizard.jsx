@@ -64,7 +64,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !running && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <span className="modal-title">Install AutoShutdown V3</span>
+          <span className="modal-title">Install AutoShutdown</span>
           {!running && (
             <button className="modal-close" onClick={onClose}>✕</button>
           )}

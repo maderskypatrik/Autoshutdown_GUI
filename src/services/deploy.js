@@ -272,7 +272,7 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
   const log = (msg, level = 'info') => onLog({ msg, level })
   const { miPrincipalId } = installation
 
-  log('Finding AutoShutdown V3 resources...')
+  log('Finding AutoShutdown resources...')
   const data = await armFetch(
     token,
     `${ARM}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`,

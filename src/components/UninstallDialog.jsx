@@ -37,7 +37,7 @@ export default function UninstallDialog({ token, subId, installation, onClose, o
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !running && onClose()}>
       <div className="modal modal-sm">
         <div className="modal-header">
-          <span className="modal-title">Uninstall AutoShutdown V3</span>
+          <span className="modal-title">Uninstall AutoShutdown</span>
           {!running && <button className="modal-close" onClick={onClose}>✕</button>}
         </div>
 
@@ -46,7 +46,7 @@ export default function UninstallDialog({ token, subId, installation, onClose, o
           {step === 1 && (
             <>
               <p className="wizard-intro">
-                This will permanently remove all AutoShutdown V3 resources from subscription and delete the RBAC role assignments.
+                This will permanently remove all AutoShutdown resources from subscription and delete the RBAC role assignments.
               </p>
               <div className="uninstall-info">
                 <p><strong>Resources to be deleted:</strong></p>
@@ -70,7 +70,7 @@ export default function UninstallDialog({ token, subId, installation, onClose, o
             <>
               <p className="wizard-intro">
                 {running && 'Removing resources…'}
-                {done    && 'All AutoShutdown V3 resources have been removed.'}
+                {done    && 'All AutoShutdown resources have been removed.'}
                 {failed  && 'Uninstall encountered an error. Some resources may remain — check the Azure Portal.'}
               </p>
               <div className="install-log" ref={logRef}>
