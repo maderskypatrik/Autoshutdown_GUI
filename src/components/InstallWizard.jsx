@@ -99,6 +99,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
                 <ul>
                   <li>Virtual Machine Contributor at subscription scope</li>
                   <li>Reader at subscription scope</li>
+                  <li>Website Contributor at resource group scope (required for self-update)</li>
                 </ul>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>
