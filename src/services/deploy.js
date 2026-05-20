@@ -117,7 +117,13 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         location,
         tags: managedTags,
         sku: { name: 'Standard_LRS' },
-        properties: { supportsHttpsTrafficOnly: true, minimumTlsVersion: 'TLS1_2', allowBlobPublicAccess: false },
+        properties: {
+          supportsHttpsTrafficOnly: true,
+          minimumTlsVersion: 'TLS1_2',
+          allowBlobPublicAccess: false,
+          networkAcls: { defaultAction: 'Deny', bypass: 'AzureServices,Logging,Metrics' },
+          keyPolicy: { keyExpirationPeriodInDays: 90 },
+        },
       }),
     }
   )
@@ -199,6 +205,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         },
         properties: {
           serverFarmId: planId,
+          httpsOnly: true,
           siteConfig: {
             appSettings: [
               { name: 'AzureWebJobsStorage',                     value: storageConnStr },
