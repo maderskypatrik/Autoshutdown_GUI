@@ -100,6 +100,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
                   <li>Virtual Machine Contributor at subscription scope</li>
                   <li>Reader at subscription scope</li>
                   <li>Website Contributor at resource group scope (required for self-update)</li>
+                  <li>Storage Blob Data Owner, Queue Data Contributor, Table Data Contributor, File SMB Share Contributor at storage account scope (required for identity-based storage access)</li>
                 </ul>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>

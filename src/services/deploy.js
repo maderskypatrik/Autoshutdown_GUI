@@ -4,10 +4,14 @@ const MANAGED_TAG_KEY = 'autoshutdown-managed'
 const MANAGED_TAG_VAL = 'v3'
 const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
 
-// Role definition IDs (built-in, subscription-scope assignments)
-const ROLE_VM_CONTRIBUTOR      = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
-const ROLE_READER              = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
-const ROLE_WEBSITE_CONTRIBUTOR = 'de139f84-1756-47ae-9be6-808fbbe84772'
+// Role definition IDs (built-in)
+const ROLE_VM_CONTRIBUTOR                 = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
+const ROLE_READER                         = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+const ROLE_WEBSITE_CONTRIBUTOR            = 'de139f84-1756-47ae-9be6-808fbbe84772'
+const ROLE_STORAGE_BLOB_DATA_OWNER        = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+const ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
+const ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+const ROLE_STORAGE_FILE_SMB_CONTRIBUTOR   = '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb'
 
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
@@ -136,14 +140,16 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   })
   log('Storage Account ready.', 'success')
 
-  log('Retrieving storage key...')
-  const keysData = await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/listKeys?api-version=2023-01-01`,
-    { method: 'POST', body: '{}' }
-  )
-  const storageKey     = keysData.keys[0].value
-  const storageConnStr = `DefaultEndpointsProtocol=https;AccountName=${storageAccountName};AccountKey=${storageKey};EndpointSuffix=core.windows.net`
+  // ── Storage RBAC roles (assigned early so they propagate before Function App starts) ──
+  const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
+  log('Assigning storage identity roles to Managed Identity...')
+  await Promise.all([
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_FILE_SMB_CONTRIBUTOR),
+  ])
+  log('Storage identity roles assigned.', 'success')
 
   // ── Step 3: App Service Plan (Consumption/Y1) ──────────────────────────────
   log(`Creating App Service Plan: ${planName}...`)
@@ -207,8 +213,12 @@ export async function installAutoShutdown(token, subId, config, onLog) {
           httpsOnly: true,
           siteConfig: {
             appSettings: [
-              { name: 'AzureWebJobsStorage',                     value: storageConnStr },
-              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', value: storageConnStr },
+              { name: 'AzureWebJobsStorage__accountName',                              value: storageAccountName },
+              { name: 'AzureWebJobsStorage__credential',                               value: 'managedidentity' },
+              { name: 'AzureWebJobsStorage__clientId',                                 value: miClientId },
+              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__accountName',          value: storageAccountName },
+              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__credential',           value: 'managedidentity' },
+              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__clientId',             value: miClientId },
               { name: 'WEBSITE_CONTENTSHARE',                    value: functionAppName },
               { name: 'FUNCTIONS_EXTENSION_VERSION',             value: '~4' },
               { name: 'FUNCTIONS_WORKER_RUNTIME',                value: 'powershell' },
@@ -259,6 +269,20 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('Storage account network restrictions applied.', 'success')
+
+  // ── Disable Shared Key access (must be absolute last — Function App must be running first) ──
+  log('Disabling storage account Shared Key access...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        properties: { allowSharedKeyAccess: false },
+      }),
+    }
+  )
+  log('Shared Key access disabled.', 'success')
 
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
