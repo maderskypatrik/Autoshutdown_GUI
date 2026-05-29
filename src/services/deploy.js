@@ -189,12 +189,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               properties: {
                 addressPrefix: '10.200.1.0/24',
                 networkSecurityGroup: { id: nsgId },
-                delegations: [
-                  {
-                    name: 'flexDelegation',
-                    properties: { serviceName: 'Microsoft.App/environments' },
-                  },
-                ],
                 serviceEndpoints: [{ service: 'Microsoft.Storage' }],
               },
             },
@@ -389,8 +383,8 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               },
             },
             scaleAndConcurrency: {
-              alwaysReady: [],
               instanceMemoryMB: 2048,
+              maximumInstanceCount: 100,
             },
             runtime: {
               name: 'powershell',
