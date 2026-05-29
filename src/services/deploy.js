@@ -197,6 +197,10 @@ export async function installAutoShutdown(token, subId, config, onLog) {
                 addressPrefix: '10.200.1.0/24',
                 networkSecurityGroup: { id: nsgId },
                 serviceEndpoints: [{ service: 'Microsoft.Storage' }],
+                delegations: [{
+                  name: 'flexDelegation',
+                  properties: { serviceName: 'Microsoft.App/environments' },
+                }],
               },
             },
             {
