@@ -246,22 +246,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_WEBSITE_CONTRIBUTOR)
   log('Website Contributor role assigned.', 'success')
 
-  // ── Storage network hardening (applied after Function App is provisioned) ────
-  log('Applying storage account network restrictions...')
-  await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({
-        properties: {
-          networkAcls: { defaultAction: 'Deny', bypass: 'AzureServices,Logging,Metrics' },
-        },
-      }),
-    }
-  )
-  log('Storage account network restrictions applied.', 'success')
-
   log('Disabling storage account Shared Key access...')
   await armFetch(
     token,
