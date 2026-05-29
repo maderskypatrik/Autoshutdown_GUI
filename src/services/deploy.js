@@ -513,7 +513,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   // ── Step 13: Private DNS zone ─────────────────────────────────────────────
   log(`Creating private DNS zone (${dnsZoneName})...`)
-  const dnsZoneData = await armFetch(
+  await armFetch(
     token,
     `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`,
     {
@@ -525,7 +525,14 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       }),
     }
   )
-  const dnsZoneId = dnsZoneData.id
+  const dnsZoneFinal = await poll(async () => {
+    const z = await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`
+    )
+    return z?.properties?.provisioningState === 'Succeeded' ? z : null
+  })
+  const dnsZoneId = dnsZoneFinal.id
   log('Private DNS zone created.', 'success')
 
   // ── Step 14: DNS zone VNet link ───────────────────────────────────────────
