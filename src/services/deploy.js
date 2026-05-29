@@ -267,7 +267,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
                 allowedOrigins: ['*'],
                 allowedMethods: ['GET', 'HEAD', 'PUT', 'OPTIONS'],
                 allowedHeaders: ['*'],
-                exposedHeaders: ['*'],
+                exposedHeaders: [],
                 maxAgeInSeconds: 3600,
               },
             ],
@@ -277,7 +277,20 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('CORS configured.', 'success')
-  await new Promise(r => setTimeout(r, 8000)) // let CORS propagate to data plane
+
+  // ── Step 5c: Wait for CORS to go live on the blob data plane ─────────────
+  // ARM returns 200 but the storage data plane picks up CORS asynchronously.
+  // A simple HEAD (no custom headers → no preflight) throws TypeError when
+  // CORS isn't ready yet, and resolves (any status) once CORS headers appear.
+  log('Waiting for blob CORS to propagate (up to 2 min)...')
+  const corsProbeUrl = `https://${storageAccountName}.blob.core.windows.net/deployment?restype=container`
+  let corsReady = false
+  for (let i = 0; i < 24 && !corsReady; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+    try { await fetch(corsProbeUrl, { method: 'HEAD' }); corsReady = true } catch {}
+  }
+  if (!corsReady) throw new Error('Storage CORS did not become available within 2 minutes.')
+  log('Blob CORS is live.', 'success')
 
   // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
   const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
