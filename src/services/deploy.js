@@ -54,6 +54,7 @@ async function uploadBlobBlocks(accountName, containerName, blobName, arrayBuffe
     blockIds.push(blockId)
     const res = await fetch(`${base}?comp=block&blockid=${encodeURIComponent(blockId)}&${sasToken}`, {
       method: 'PUT',
+      headers: { 'x-ms-version': '2020-10-02' },
       body: chunk,
     })
     if (!res.ok) throw new Error(`Block upload failed: HTTP ${res.status}`)
