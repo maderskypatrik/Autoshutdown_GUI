@@ -64,6 +64,7 @@ async function uploadBlobBlocks(accountName, containerName, blobName, arrayBuffe
   const res = await fetch(`${base}?comp=blocklist&${sasToken}`, {
     method: 'PUT',
     headers: {
+      'x-ms-version': '2020-10-02',
       'Content-Type': 'application/xml',
       'x-ms-blob-content-type': 'application/zip',
     },
@@ -276,6 +277,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('CORS configured.', 'success')
+  await new Promise(r => setTimeout(r, 8000)) // let CORS propagate to data plane
 
   // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
   const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
