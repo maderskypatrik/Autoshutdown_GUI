@@ -323,7 +323,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log(`Creating Flex Consumption Plan: ${planName}...`)
   const planData = await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2023-12-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2024-04-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
@@ -331,7 +331,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         location,
         tags: managedTags,
         sku: { name: 'FC1', tier: 'FlexConsumption' },
-        properties: {},
+        properties: { reserved: true },
       }),
     }
   )
@@ -362,7 +362,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log(`Creating Function App: ${functionAppName}...`)
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-12-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
@@ -651,6 +651,6 @@ function apiVersionFor(type) {
   if (t.includes('insights'))         return '2020-02-02'
   if (t.includes('privatednszones'))  return '2020-06-01'
   if (t.includes('network'))          return '2023-09-01'
-  if (t.includes('web/'))             return '2023-12-01'
+  if (t.includes('web/'))             return '2024-04-01'
   return '2023-01-01'
 }
