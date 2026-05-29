@@ -11,6 +11,7 @@ const ROLE_WEBSITE_CONTRIBUTOR            = 'de139f84-1756-47ae-9be6-808fbbe8477
 const ROLE_STORAGE_BLOB_DATA_OWNER        = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 const ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 const ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+const ROLE_STORAGE_FILE_SMB_CONTRIBUTOR   = '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb'
 
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
@@ -146,6 +147,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_FILE_SMB_CONTRIBUTOR),
   ])
   log('Storage identity roles assigned.', 'success')
 
@@ -234,7 +236,32 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Function App created.', 'success')
 
-  // ── Step 5: RBAC roles at subscription scope ───────────────────────────────
+  // ── Step 5b: Content share settings — must be PATCH after creation, ARM rejects identity-based format in initial PUT ──
+  log('Configuring content share settings...')
+  const currentSettings = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/config/appsettings/list?api-version=2023-01-01`,
+    { method: 'POST' }
+  )
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/config/appsettings?api-version=2023-01-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          ...(currentSettings?.properties ?? {}),
+          WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__accountName: storageAccountName,
+          WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__credential:  'managedidentity',
+          WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__clientId:    miClientId,
+          WEBSITE_CONTENTSHARE:                                  functionAppName,
+        },
+      }),
+    }
+  )
+  log('Content share settings configured.', 'success')
+
+  // ── Step 6: RBAC roles at subscription scope ───────────────────────────────
   log('Assigning Virtual Machine Contributor role...')
   await assignRole(token, subId, `/subscriptions/${subId}`, miPrincipalId, ROLE_VM_CONTRIBUTOR)
   log('VM Contributor role assigned.', 'success')
