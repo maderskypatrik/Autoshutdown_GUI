@@ -262,6 +262,32 @@ export async function installAutoShutdown(token, storageToken, subId, config, on
   )
   log('Blob container created.', 'success')
 
+  // ── Step 5b: CORS on blob service (required for browser upload) ──────────
+  log('Configuring blob service CORS...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/blobServices/default?api-version=2023-01-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          cors: {
+            corsRules: [
+              {
+                allowedOrigins: ['*'],
+                allowedMethods: ['GET', 'HEAD', 'PUT', 'OPTIONS'],
+                allowedHeaders: ['*'],
+                exposedHeaders: ['*'],
+                maxAgeInSeconds: 3600,
+              },
+            ],
+          },
+        },
+      }),
+    }
+  )
+  log('CORS configured.', 'success')
+
   // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
   const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
   log('Assigning storage RBAC roles to Managed Identity...')
