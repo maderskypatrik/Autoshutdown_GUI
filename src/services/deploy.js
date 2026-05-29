@@ -303,7 +303,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       body: JSON.stringify({
         signedServices: 'b',
         signedResourceTypes: 'o',
-        signedPermissions: 'rw',
+        signedPermission: 'rw',
         signedProtocol: 'https',
         signedExpiry: sasExpiry,
       }),
