@@ -1,7 +1,4 @@
 import { useState, useRef, useEffect } from 'react'
-import { useMsal } from '@azure/msal-react'
-import { InteractionRequiredAuthError } from '@azure/msal-browser'
-import { storageScopes } from '../authConfig'
 import { installAutoShutdown } from '../services/deploy'
 
 const TIMEZONES = [
@@ -22,7 +19,6 @@ const TIMEZONES = [
 ]
 
 export default function InstallWizard({ token, subId, resourceGroups, onClose, onInstalled }) {
-  const { instance, accounts } = useMsal()
   const [step, setStep]               = useState(1) // 1=ToU, 2=Config, 3=Progress
   const [agreed, setAgreed]           = useState(false)
   const [rg, setRg]                   = useState(resourceGroups[0]?.name ?? '')
@@ -49,19 +45,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
     setFailed(false)
     setLog([])
     try {
-      let storageToken
-      try {
-        const r = await instance.acquireTokenSilent({ scopes: storageScopes, account: accounts[0] })
-        storageToken = r.accessToken
-      } catch (e) {
-        if (e instanceof InteractionRequiredAuthError) {
-          const r = await instance.acquireTokenPopup({ scopes: storageScopes })
-          storageToken = r.accessToken
-        } else {
-          throw e
-        }
-      }
-      await installAutoShutdown(token, storageToken, subId, { resourceGroup: rg, functionAppName: funcName, timezone }, appendLog)
+      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone }, appendLog)
       setDone(true)
     } catch (e) {
       appendLog({ msg: `Installation failed: ${e.message}`, level: 'error' })

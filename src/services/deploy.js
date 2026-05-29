@@ -43,7 +43,7 @@ async function poll(fn, { intervalMs = 5000, timeoutMs = 180000 } = {}) {
   throw new Error('Timed out waiting for resource to provision.')
 }
 
-async function uploadBlobBlocks(storageToken, accountName, containerName, blobName, arrayBuffer) {
+async function uploadBlobBlocks(accountName, containerName, blobName, arrayBuffer, sasToken) {
   const base = `https://${accountName}.blob.core.windows.net/${containerName}/${blobName}`
   const chunkSize = 25 * 1024 * 1024
   const blockIds = []
@@ -52,23 +52,17 @@ async function uploadBlobBlocks(storageToken, accountName, containerName, blobNa
     const chunk = arrayBuffer.slice(offset, Math.min(offset + chunkSize, arrayBuffer.byteLength))
     const blockId = btoa(String(blockIds.length).padStart(6, '0'))
     blockIds.push(blockId)
-    const res = await fetch(`${base}?comp=block&blockid=${encodeURIComponent(blockId)}`, {
+    const res = await fetch(`${base}?comp=block&blockid=${encodeURIComponent(blockId)}&${sasToken}`, {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${storageToken}`,
-        'x-ms-version': '2020-10-02',
-      },
       body: chunk,
     })
     if (!res.ok) throw new Error(`Block upload failed: HTTP ${res.status}`)
   }
 
   const xml = `<?xml version="1.0" encoding="utf-8"?><BlockList>${blockIds.map(id => `<Latest>${id}</Latest>`).join('')}</BlockList>`
-  const res = await fetch(`${base}?comp=blocklist`, {
+  const res = await fetch(`${base}?comp=blocklist&${sasToken}`, {
     method: 'PUT',
     headers: {
-      Authorization: `Bearer ${storageToken}`,
-      'x-ms-version': '2020-10-02',
       'Content-Type': 'application/xml',
       'x-ms-blob-content-type': 'application/zip',
     },
@@ -109,7 +103,7 @@ export async function detectInstallation(token, subId) {
 
 // ── Install ───────────────────────────────────────────────────────────────────
 
-export async function installAutoShutdown(token, storageToken, subId, config, onLog) {
+export async function installAutoShutdown(token, subId, config, onLog) {
   const { resourceGroup, functionAppName, timezone } = config
   const log = (msg, level = 'info') => onLog({ msg, level })
 
@@ -298,14 +292,30 @@ export async function installAutoShutdown(token, storageToken, subId, config, on
   ])
   log('Storage RBAC roles assigned.', 'success')
 
-  // ── Step 7: Upload deployment package ─────────────────────────────────────
+  // ── Step 7: Upload deployment package via ARM-generated SAS ──────────────
+  log('Generating SAS token for package upload...')
+  const sasExpiry = new Date(Date.now() + 3600 * 1000).toISOString().slice(0, 19) + 'Z'
+  const sasData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/listAccountSas?api-version=2023-01-01`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        signedServices: 'b',
+        signedResourceTypes: 'o',
+        signedPermissions: 'rw',
+        signedProtocol: 'https',
+        signedExpiry: sasExpiry,
+      }),
+    }
+  )
+  const sasToken = sasData.accountSasToken
   log('Downloading function package...')
-  const packageUrl = `${window.location.origin}/function-app.zip`
-  const pkgRes = await fetch(packageUrl)
+  const pkgRes = await fetch(`${window.location.origin}/function-app.zip`)
   if (!pkgRes.ok) throw new Error(`Failed to fetch function-app.zip: HTTP ${pkgRes.status}`)
   const pkgBuffer = await pkgRes.arrayBuffer()
   log(`Package downloaded (${Math.round(pkgBuffer.byteLength / 1024 / 1024)} MB). Uploading to storage...`)
-  await uploadBlobBlocks(storageToken, storageAccountName, 'deployment', 'function-app.zip', pkgBuffer)
+  await uploadBlobBlocks(storageAccountName, 'deployment', 'function-app.zip', pkgBuffer, sasToken)
   log('Package uploaded to blob storage.', 'success')
 
   // ── Step 8: Flex Consumption Plan ─────────────────────────────────────────
