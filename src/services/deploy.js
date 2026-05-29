@@ -437,6 +437,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'TIMEZONE',                                  value: timezone },
               { name: 'VERSION',                                   value: (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0') },
               { name: 'FUNCTION_APP_RESOURCE_ID',                  value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
+              { name: 'WEBSITE_DNS_SERVER',                        value: '168.63.129.16' },
             ],
           },
         },
@@ -609,6 +610,21 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('Shared Key access disabled.', 'success')
+
+  // ── Step 18: Sync function triggers ──────────────────────────────────────
+  // Tells the Flex Consumption scale controller to pick up function definitions
+  // from the deployment package now that all infrastructure is in place.
+  log('Syncing function triggers...')
+  try {
+    await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/syncfunctiontriggers?api-version=2023-12-01`,
+      { method: 'POST' }
+    )
+  } catch (e) {
+    log(`Trigger sync: ${e.message}`, 'warn')
+  }
+  log('Function triggers synced.', 'success')
 
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
