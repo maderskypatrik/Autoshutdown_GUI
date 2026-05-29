@@ -506,8 +506,10 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const peId = peData.id
   log('Waiting for private endpoint to provision...')
   await poll(async () => {
-    const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
-    return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
+    try {
+      const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
+      return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
+    } catch { return null }
   })
   log('Private endpoint ready.', 'success')
 
@@ -526,11 +528,13 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   const dnsZoneFinal = await poll(async () => {
-    const z = await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`
-    )
-    return z?.properties?.provisioningState === 'Succeeded' ? z : null
+    try {
+      const z = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`
+      )
+      return z?.properties?.provisioningState === 'Succeeded' ? z : null
+    } catch { return null }
   })
   const dnsZoneId = dnsZoneFinal.id
   log('Private DNS zone created.', 'success')
