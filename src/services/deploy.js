@@ -23,8 +23,14 @@ async function armFetch(token, url, options = {}) {
   if (!res.ok) {
     let msg = `HTTP ${res.status}`
     try {
-      const j = await res.json()
-      msg = j.error?.message ?? j.message ?? msg
+      const text = await res.text()
+      try {
+        const j = JSON.parse(text)
+        msg = j.error?.message ?? j.error?.code ?? j.message ?? msg
+        if (j.error?.details?.length) msg += ' — ' + j.error.details.map(d => d.message).join('; ')
+      } catch {
+        if (text) msg += ': ' + text.slice(0, 400)
+      }
     } catch {}
     throw new Error(msg)
   }
