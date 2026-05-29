@@ -445,19 +445,21 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Function App created.', 'success')
 
-  // ── Step 10b: Attach VNet integration via site PATCH ────────────────────
-  // virtualNetworkSubnetId cannot be set in the initial PUT body for FC1
-  // (causes empty 400). PATCH on the existing site works instead.
-  // No subnet delegation needed — Flex Consumption uses Swift VNet integration
-  // and Azure auto-adds Microsoft.Web/serverFarms delegation on attachment.
+  // ── Step 10b: Attach Swift VNet integration via virtualNetworkConnections ──
+  // This is the endpoint Azure CLI (az functionapp vnet-integration add) uses.
+  // networkConfig/virtualNetwork and site PATCH both return empty 400 for FC1.
   log('Enabling VNet integration on Function App...')
+  const vnetShortName = vnetId.split('/').pop()
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-12-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/virtualNetworkConnections/${vnetShortName}?api-version=2022-03-01`,
     {
-      method: 'PATCH',
+      method: 'PUT',
       body: JSON.stringify({
-        properties: { virtualNetworkSubnetId: flexSubnetId },
+        properties: {
+          subnetResourceId: flexSubnetId,
+          isSwift: true,
+        },
       }),
     }
   )
