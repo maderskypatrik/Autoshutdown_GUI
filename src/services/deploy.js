@@ -384,10 +384,13 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log('Application Insights created.', 'success')
 
   // ── Step 10: Function App (Flex Consumption, VNet integrated) ─────────────
+  if (!planId)        throw new Error('planId is null — plan did not return an ARM resource ID')
+  if (!flexSubnetId)  throw new Error('flexSubnetId is null — VNet response missing snet-flex ID')
+  if (!miResourceId)  throw new Error('miResourceId is null — MI response missing resource ID')
   log(`Creating Function App: ${functionAppName}...`)
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-12-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
