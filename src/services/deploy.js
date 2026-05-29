@@ -390,7 +390,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log(`Creating Function App: ${functionAppName}...`)
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-12-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
