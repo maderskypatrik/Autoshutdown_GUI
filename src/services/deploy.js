@@ -11,7 +11,6 @@ const ROLE_WEBSITE_CONTRIBUTOR            = 'de139f84-1756-47ae-9be6-808fbbe8477
 const ROLE_STORAGE_BLOB_DATA_OWNER        = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 const ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 const ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
-const ROLE_STORAGE_FILE_SMB_CONTRIBUTOR   = '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb'
 
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
@@ -147,7 +146,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_FILE_SMB_CONTRIBUTOR),
   ])
   log('Storage identity roles assigned.', 'success')
 
@@ -216,10 +214,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'AzureWebJobsStorage__accountName',                              value: storageAccountName },
               { name: 'AzureWebJobsStorage__credential',                               value: 'managedidentity' },
               { name: 'AzureWebJobsStorage__clientId',                                 value: miClientId },
-              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__accountName', value: storageAccountName },
-              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__credential', value: 'managedidentity' },
-              { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING__clientId',   value: miClientId },
-              { name: 'WEBSITE_CONTENTSHARE',                                 value: functionAppName },
               { name: 'FUNCTIONS_EXTENSION_VERSION',             value: '~4' },
               { name: 'FUNCTIONS_WORKER_RUNTIME',                value: 'powershell' },
               { name: 'WEBSITE_RUN_FROM_PACKAGE',                value: packageUrl },
