@@ -408,7 +408,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         properties: {
           serverFarmId: planId,
           httpsOnly: true,
-          virtualNetworkSubnetId: flexSubnetId,
           functionAppConfig: {
             deployment: {
               storage: {
@@ -449,6 +448,23 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('Function App created.', 'success')
+
+  // ── Step 10b: Attach VNet integration (Flex Consumption requires separate PATCH) ──
+  log('Enabling VNet integration on Function App...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/networkConfig/virtualNetwork?api-version=2023-12-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          subnetResourceId: flexSubnetId,
+          swiftSupported: true,
+        },
+      }),
+    }
+  )
+  log('VNet integration enabled.', 'success')
 
   // ── Step 11: Subscription + RG RBAC ──────────────────────────────────────
   log('Assigning Virtual Machine Contributor role...')
