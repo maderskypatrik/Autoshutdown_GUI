@@ -16,3 +16,6 @@ export const msalConfig = {
 
 // Scope required to call Azure ARM REST APIs on behalf of the signed-in user
 export const armScopes = ['https://management.azure.com/user_impersonation']
+
+// Scope required to upload blobs to Azure Storage on behalf of the signed-in user
+export const storageScopes = ['https://storage.azure.com/user_impersonation']

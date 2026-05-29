@@ -1,4 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
+import { useMsal } from '@azure/msal-react'
+import { InteractionRequiredAuthError } from '@azure/msal-browser'
+import { storageScopes } from '../authConfig'
 import { installAutoShutdown } from '../services/deploy'
 
 const TIMEZONES = [
@@ -19,6 +22,7 @@ const TIMEZONES = [
 ]
 
 export default function InstallWizard({ token, subId, resourceGroups, onClose, onInstalled }) {
+  const { instance, accounts } = useMsal()
   const [step, setStep]               = useState(1) // 1=ToU, 2=Config, 3=Progress
   const [agreed, setAgreed]           = useState(false)
   const [rg, setRg]                   = useState(resourceGroups[0]?.name ?? '')
@@ -45,7 +49,19 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
     setFailed(false)
     setLog([])
     try {
-      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone }, appendLog)
+      let storageToken
+      try {
+        const r = await instance.acquireTokenSilent({ scopes: storageScopes, account: accounts[0] })
+        storageToken = r.accessToken
+      } catch (e) {
+        if (e instanceof InteractionRequiredAuthError) {
+          const r = await instance.acquireTokenPopup({ scopes: storageScopes })
+          storageToken = r.accessToken
+        } else {
+          throw e
+        }
+      }
+      await installAutoShutdown(token, storageToken, subId, { resourceGroup: rg, functionAppName: funcName, timezone }, appendLog)
       setDone(true)
     } catch (e) {
       appendLog({ msg: `Installation failed: ${e.message}`, level: 'error' })
@@ -91,17 +107,20 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
                 <p><strong>What will be installed:</strong></p>
                 <ul>
                   <li>User-Assigned Managed Identity</li>
-                  <li>Storage Account (Standard LRS)</li>
-                  <li>App Service Plan (Consumption, ~free)</li>
-                  <li>Function App (PowerShell 7.4, runs every 15 minutes)</li>
+                  <li>Network Security Group + Virtual Network (two subnets)</li>
+                  <li>Storage Account (Standard LRS) with private endpoint and network restrictions</li>
+                  <li>Flex Consumption Plan + Function App (PowerShell 7.4, runs every 15 minutes)</li>
+                  <li>Application Insights</li>
+                  <li>Private DNS Zone (privatelink.blob.core.windows.net)</li>
                 </ul>
                 <p><strong>Permissions granted to the Function App:</strong></p>
                 <ul>
                   <li>Virtual Machine Contributor at subscription scope</li>
                   <li>Reader at subscription scope</li>
                   <li>Website Contributor at resource group scope (required for self-update)</li>
-                  <li>Storage Blob Data Owner, Queue Data Contributor, Table Data Contributor at storage account scope (required for identity-based storage access)</li>
+                  <li>Storage Blob Data Owner, Queue Data Contributor, Table Data Contributor at storage account scope</li>
                 </ul>
+                <p><strong>Estimated cost:</strong> ~$7.30/month (private endpoint for blob storage). All other resources are free-tier or pay-per-use.</p>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>
                   <a href="https://devstack.vwgroup.com/confluence/x/oN1ltgE" target="_blank" rel="noreferrer">View full Terms of Use ↗</a>
@@ -173,7 +192,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
           {step === 3 && (
             <>
               <p className="wizard-intro">
-                {running && 'Deploying Azure resources — this takes 1–3 minutes, please wait…'}
+                {running && 'Deploying Azure resources — this takes 3–5 minutes, please wait…'}
                 {done    && 'Installation complete. The Function App will be ready within a few minutes.'}
                 {failed  && 'Installation encountered an error. Review the log below.'}
               </p>

@@ -4,13 +4,13 @@ const MANAGED_TAG_KEY = 'autoshutdown-managed'
 const MANAGED_TAG_VAL = 'v3'
 const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
 
-// Role definition IDs (built-in)
 const ROLE_VM_CONTRIBUTOR                 = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
 const ROLE_READER                         = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
 const ROLE_WEBSITE_CONTRIBUTOR            = 'de139f84-1756-47ae-9be6-808fbbe84772'
 const ROLE_STORAGE_BLOB_DATA_OWNER        = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 const ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 const ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
     ...options,
@@ -43,7 +43,41 @@ async function poll(fn, { intervalMs = 5000, timeoutMs = 180000 } = {}) {
   throw new Error('Timed out waiting for resource to provision.')
 }
 
-// ── Detection ────────────────────────────────────────────────────────────────
+async function uploadBlobBlocks(storageToken, accountName, containerName, blobName, arrayBuffer) {
+  const base = `https://${accountName}.blob.core.windows.net/${containerName}/${blobName}`
+  const chunkSize = 25 * 1024 * 1024
+  const blockIds = []
+
+  for (let offset = 0; offset < arrayBuffer.byteLength; offset += chunkSize) {
+    const chunk = arrayBuffer.slice(offset, Math.min(offset + chunkSize, arrayBuffer.byteLength))
+    const blockId = btoa(String(blockIds.length).padStart(6, '0'))
+    blockIds.push(blockId)
+    const res = await fetch(`${base}?comp=block&blockid=${encodeURIComponent(blockId)}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${storageToken}`,
+        'x-ms-version': '2020-10-02',
+      },
+      body: chunk,
+    })
+    if (!res.ok) throw new Error(`Block upload failed: HTTP ${res.status}`)
+  }
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?><BlockList>${blockIds.map(id => `<Latest>${id}</Latest>`).join('')}</BlockList>`
+  const res = await fetch(`${base}?comp=blocklist`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${storageToken}`,
+      'x-ms-version': '2020-10-02',
+      'Content-Type': 'application/xml',
+      'x-ms-blob-content-type': 'application/zip',
+    },
+    body: xml,
+  })
+  if (!res.ok) throw new Error(`Commit block list failed: HTTP ${res.status}`)
+}
+
+// ── Detection ─────────────────────────────────────────────────────────────────
 
 export async function detectInstallation(token, subId) {
   const data = await armFetch(
@@ -73,13 +107,11 @@ export async function detectInstallation(token, subId) {
   }
 }
 
-// ── Install ──────────────────────────────────────────────────────────────────
+// ── Install ───────────────────────────────────────────────────────────────────
 
-export async function installAutoShutdown(token, subId, config, onLog) {
+export async function installAutoShutdown(token, storageToken, subId, config, onLog) {
   const { resourceGroup, functionAppName, timezone } = config
   const log = (msg, level = 'info') => onLog({ msg, level })
-
-  const packageUrl = `${window.location.origin}/function-app.zip`
 
   log('Reading resource group location...')
   const rgData = await armFetch(
@@ -91,11 +123,15 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   const rand = Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 4).padEnd(4, 'x')
   const storageAccountName = `stautoshutdown${rand}`
-  const miName   = 'mi-autoshutdown'
-  const planName = 'plan-autoshutdown'
+  const miName      = 'mi-autoshutdown'
+  const planName    = 'plan-autoshutdown'
+  const vnetName    = 'vnet-autoshutdown'
+  const nsgName     = 'nsg-autoshutdown'
+  const peName      = 'pe-autoshutdown-blob'
+  const dnsZoneName = 'privatelink.blob.core.windows.net'
   const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
 
-  // ── Step 1: User-Assigned Managed Identity ─────────────────────────────────
+  // ── Step 1: Managed Identity ───────────────────────────────────────────────
   log('Creating User-Assigned Managed Identity...')
   const miData = await armFetch(
     token,
@@ -107,7 +143,85 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const miPrincipalId = miData.properties.principalId
   log(`Managed Identity created (principal: ${miPrincipalId})`, 'success')
 
-  // ── Step 2: Storage Account ────────────────────────────────────────────────
+  // ── Step 2: NSG ───────────────────────────────────────────────────────────
+  log('Creating Network Security Group (nsg-01)...')
+  const nsgData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/networkSecurityGroups/${nsgName}?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        tags: managedTags,
+        properties: {
+          securityRules: [
+            {
+              name: 'DenyHighRiskInbound',
+              properties: {
+                priority: 100,
+                protocol: '*',
+                sourcePortRange: '*',
+                destinationPortRanges: ['22', '3389', '1433', '3306', '5432', '23', '21', '445', '135'],
+                sourceAddressPrefix: 'Internet',
+                destinationAddressPrefix: '*',
+                access: 'Deny',
+                direction: 'Inbound',
+              },
+            },
+          ],
+        },
+      }),
+    }
+  )
+  const nsgId = nsgData.id
+  log('NSG created.', 'success')
+
+  // ── Step 3: VNet (flex subnet + PE subnet) ────────────────────────────────
+  log('Creating Virtual Network...')
+  const vnetData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/virtualNetworks/${vnetName}?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        tags: managedTags,
+        properties: {
+          addressSpace: { addressPrefixes: ['10.200.0.0/16'] },
+          subnets: [
+            {
+              name: 'snet-flex',
+              properties: {
+                addressPrefix: '10.200.1.0/24',
+                networkSecurityGroup: { id: nsgId },
+                delegations: [
+                  {
+                    name: 'flexDelegation',
+                    properties: { serviceName: 'Microsoft.App/environments' },
+                  },
+                ],
+                serviceEndpoints: [{ service: 'Microsoft.Storage' }],
+              },
+            },
+            {
+              name: 'snet-pe',
+              properties: {
+                addressPrefix: '10.200.2.0/24',
+                networkSecurityGroup: { id: nsgId },
+                privateEndpointNetworkPolicies: 'Disabled',
+              },
+            },
+          ],
+        },
+      }),
+    }
+  )
+  const vnetId       = vnetData.id
+  const flexSubnetId = vnetData.properties.subnets.find(s => s.name === 'snet-flex').id
+  const peSubnetId   = vnetData.properties.subnets.find(s => s.name === 'snet-pe').id
+  log('Virtual Network created.', 'success')
+
+  // ── Step 4: Storage Account (open, hardened after deploy) ─────────────────
   log(`Creating Storage Account: ${storageAccountName}...`)
   await armFetch(
     token,
@@ -129,45 +243,65 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('Waiting for Storage Account to provision (up to 3 min)...')
-  await poll(async () => {
+  const storageData = await poll(async () => {
     const s = await armFetch(
       token,
       `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`
     )
     return s?.properties?.provisioningState === 'Succeeded' ? s : null
   })
+  const storageAccountId = storageData.id
   log('Storage Account ready.', 'success')
 
-  // ── Storage RBAC roles (assigned early so they propagate before Function App starts) ──
+  // ── Step 5: Blob container for deployment package ─────────────────────────
+  log('Creating deployment blob container...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/blobServices/default/containers/deployment?api-version=2023-01-01`,
+    { method: 'PUT', body: JSON.stringify({ properties: { publicAccess: 'None' } }) }
+  )
+  log('Blob container created.', 'success')
+
+  // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
   const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
-  log('Assigning storage identity roles to Managed Identity...')
+  log('Assigning storage RBAC roles to Managed Identity...')
   await Promise.all([
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
   ])
-  log('Storage identity roles assigned.', 'success')
+  log('Storage RBAC roles assigned.', 'success')
 
-  // ── Step 3: App Service Plan (Consumption/Y1) ──────────────────────────────
-  log(`Creating App Service Plan: ${planName}...`)
+  // ── Step 7: Upload deployment package ─────────────────────────────────────
+  log('Downloading function package...')
+  const packageUrl = `${window.location.origin}/function-app.zip`
+  const pkgRes = await fetch(packageUrl)
+  if (!pkgRes.ok) throw new Error(`Failed to fetch function-app.zip: HTTP ${pkgRes.status}`)
+  const pkgBuffer = await pkgRes.arrayBuffer()
+  log(`Package downloaded (${Math.round(pkgBuffer.byteLength / 1024 / 1024)} MB). Uploading to storage...`)
+  await uploadBlobBlocks(storageToken, storageAccountName, 'deployment', 'function-app.zip', pkgBuffer)
+  log('Package uploaded to blob storage.', 'success')
+
+  // ── Step 8: Flex Consumption Plan ─────────────────────────────────────────
+  log(`Creating Flex Consumption Plan: ${planName}...`)
   const planData = await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2023-01-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2023-12-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
         kind: 'functionapp',
         location,
         tags: managedTags,
-        sku: { name: 'Y1', tier: 'Dynamic' },
-        properties: { reserved: true },
+        sku: { name: 'FC1', tier: 'FlexConsumption' },
+        properties: {},
       }),
     }
   )
   const planId = planData.id
-  log('App Service Plan created.', 'success')
+  log('Flex Consumption Plan created.', 'success')
 
-  // ── Step 4: Application Insights ──────────────────────────────────────────
+  // ── Step 9: Application Insights ─────────────────────────────────────────
   log('Creating Application Insights...')
   const aiName = `ai-${functionAppName}`
   const aiData = await armFetch(
@@ -183,24 +317,21 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       }),
     }
   )
-  const aiConnectionString    = aiData.properties.ConnectionString
-  const aiInstrumentationKey  = aiData.properties.InstrumentationKey
+  const aiConnectionString   = aiData.properties.ConnectionString
+  const aiInstrumentationKey = aiData.properties.InstrumentationKey
   log('Application Insights created.', 'success')
 
-  // ── Step 5: Function App ───────────────────────────────────────────────────
+  // ── Step 10: Function App (Flex Consumption, VNet integrated) ─────────────
   log(`Creating Function App: ${functionAppName}...`)
   await armFetch(
     token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-01-01`,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2023-12-01`,
     {
       method: 'PUT',
       body: JSON.stringify({
         kind: 'functionapp,linux',
         location,
-        tags: {
-          ...managedTags,
-          [MI_PRINCIPAL_TAG]: miPrincipalId,
-        },
+        tags: { ...managedTags, [MI_PRINCIPAL_TAG]: miPrincipalId },
         identity: {
           type: 'UserAssigned',
           userAssignedIdentities: { [miResourceId]: {} },
@@ -208,24 +339,41 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         properties: {
           serverFarmId: planId,
           httpsOnly: true,
+          virtualNetworkSubnetId: flexSubnetId,
+          functionAppConfig: {
+            deployment: {
+              storage: {
+                type: 'blobContainer',
+                value: `https://${storageAccountName}.blob.core.windows.net/deployment`,
+                authentication: {
+                  type: 'UserAssignedIdentity',
+                  userAssignedIdentityResourceId: miResourceId,
+                },
+              },
+            },
+            scaleAndConcurrency: {
+              alwaysReady: [],
+              instanceMemoryMB: 2048,
+            },
+            runtime: {
+              name: 'powershell',
+              version: '7.4',
+            },
+          },
           siteConfig: {
             appSettings: [
-              { name: 'AzureWebJobsStorage__accountName',                              value: storageAccountName },
-              { name: 'AzureWebJobsStorage__credential',                               value: 'managedidentity' },
-              { name: 'AzureWebJobsStorage__clientId',                                 value: miClientId },
-              { name: 'FUNCTIONS_EXTENSION_VERSION',             value: '~4' },
-              { name: 'FUNCTIONS_WORKER_RUNTIME',                value: 'powershell' },
-              { name: 'WEBSITE_RUN_FROM_PACKAGE',                value: packageUrl },
-              { name: 'USER_ASSIGNED_MI_CLIENT_ID',              value: miClientId },
-              { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING',   value: aiConnectionString },
-              { name: 'APPINSIGHTS_INSTRUMENTATIONKEY',          value: aiInstrumentationKey },
-              { name: 'WHATIF',                                  value: 'false' },
-              { name: 'WINDOW_MINUTES',                          value: '15' },
-              { name: 'TIMEZONE',                                value: timezone },
-              { name: 'VERSION',                                 value: (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0') },
-              { name: 'FUNCTION_APP_RESOURCE_ID',              value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
+              { name: 'AzureWebJobsStorage__accountName',          value: storageAccountName },
+              { name: 'AzureWebJobsStorage__credential',           value: 'managedidentity' },
+              { name: 'AzureWebJobsStorage__clientId',             value: miClientId },
+              { name: 'USER_ASSIGNED_MI_CLIENT_ID',                value: miClientId },
+              { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING',     value: aiConnectionString },
+              { name: 'APPINSIGHTS_INSTRUMENTATIONKEY',            value: aiInstrumentationKey },
+              { name: 'WHATIF',                                    value: 'false' },
+              { name: 'WINDOW_MINUTES',                            value: '15' },
+              { name: 'TIMEZONE',                                  value: timezone },
+              { name: 'VERSION',                                   value: (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0') },
+              { name: 'FUNCTION_APP_RESOURCE_ID',                  value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
             ],
-            linuxFxVersion: 'POWERSHELL|7.4',
           },
         },
       }),
@@ -233,7 +381,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Function App created.', 'success')
 
-  // ── Step 6: RBAC roles at subscription scope ───────────────────────────────
+  // ── Step 11: Subscription + RG RBAC ──────────────────────────────────────
   log('Assigning Virtual Machine Contributor role...')
   await assignRole(token, subId, `/subscriptions/${subId}`, miPrincipalId, ROLE_VM_CONTRIBUTOR)
   log('VM Contributor role assigned.', 'success')
@@ -246,15 +394,123 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_WEBSITE_CONTRIBUTOR)
   log('Website Contributor role assigned.', 'success')
 
-  log('Disabling storage account Shared Key access...')
+  // ── Step 12: Private endpoint for blob (sa-04) ────────────────────────────
+  log('Creating private endpoint for blob storage (sa-04)...')
+  const peData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateEndpoints/${peName}?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        tags: managedTags,
+        properties: {
+          subnet: { id: peSubnetId },
+          privateLinkServiceConnections: [
+            {
+              name: 'plsc-blob',
+              properties: {
+                privateLinkServiceId: storageAccountId,
+                groupIds: ['blob'],
+              },
+            },
+          ],
+        },
+      }),
+    }
+  )
+  const peId = peData.id
+  log('Waiting for private endpoint to provision...')
+  await poll(async () => {
+    const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
+    return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
+  })
+  log('Private endpoint ready.', 'success')
+
+  // ── Step 13: Private DNS zone ─────────────────────────────────────────────
+  log(`Creating private DNS zone (${dnsZoneName})...`)
+  const dnsZoneData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location: 'global',
+        tags: managedTags,
+        properties: {},
+      }),
+    }
+  )
+  const dnsZoneId = dnsZoneData.id
+  log('Private DNS zone created.', 'success')
+
+  // ── Step 14: DNS zone VNet link ───────────────────────────────────────────
+  log('Linking DNS zone to VNet...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/virtualNetworkLinks/link-autoshutdown?api-version=2020-06-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location: 'global',
+        properties: {
+          virtualNetwork: { id: vnetId },
+          registrationEnabled: false,
+        },
+      }),
+    }
+  )
+  log('DNS zone linked to VNet.', 'success')
+
+  // ── Step 15: DNS zone group on private endpoint ───────────────────────────
+  log('Creating DNS zone group...')
+  await armFetch(
+    token,
+    `${ARM}${peId}/privateDnsZoneGroups/default?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          privateDnsZoneConfigs: [
+            {
+              name: 'config-blob',
+              properties: { privateDnsZoneId: dnsZoneId },
+            },
+          ],
+        },
+      }),
+    }
+  )
+  log('DNS zone group created.', 'success')
+
+  // ── Step 16: Storage network restrictions (sa-05) ─────────────────────────
+  log('Applying storage network restrictions (sa-05)...')
   await armFetch(
     token,
     `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`,
     {
       method: 'PATCH',
       body: JSON.stringify({
-        properties: { allowSharedKeyAccess: false },
+        properties: {
+          networkAcls: {
+            defaultAction: 'Deny',
+            bypass: 'AzureServices,Logging,Metrics',
+            virtualNetworkRules: [{ id: flexSubnetId, action: 'Allow' }],
+          },
+        },
       }),
+    }
+  )
+  log('Network restrictions applied.', 'success')
+
+  // ── Step 17: Disable Shared Key (sa-07) ───────────────────────────────────
+  log('Disabling Shared Key access (sa-07)...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}?api-version=2023-01-01`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ properties: { allowSharedKeyAccess: false } }),
     }
   )
   log('Shared Key access disabled.', 'success')
@@ -280,7 +536,7 @@ async function assignRole(token, subId, scope, principalId, roleDefId) {
   )
 }
 
-// ── Uninstall ────────────────────────────────────────────────────────────────
+// ── Uninstall ─────────────────────────────────────────────────────────────────
 
 export async function uninstallAutoShutdown(token, subId, installation, onLog) {
   const log = (msg, level = 'info') => onLog({ msg, level })
@@ -321,11 +577,15 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
     log('Role assignments removed.', 'success')
   }
 
-  // Delete resources in dependency order
   const typeOrder = [
     'microsoft.web/sites',
     'microsoft.web/serverfarms',
+    'microsoft.insights/components',
+    'microsoft.network/privateendpoints',
     'microsoft.storage/storageaccounts',
+    'microsoft.network/privatednszones',
+    'microsoft.network/virtualnetworks',
+    'microsoft.network/networksecuritygroups',
     'microsoft.managedidentity/userassignedidentities',
   ]
   const sorted = [...resources].sort((a, b) => {
@@ -350,7 +610,10 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
 
 function apiVersionFor(type) {
   const t = type.toLowerCase()
-  if (t.includes('managedidentity')) return '2023-01-31'
-  if (t.includes('insights'))        return '2020-02-02'
+  if (t.includes('managedidentity'))  return '2023-01-31'
+  if (t.includes('insights'))         return '2020-02-02'
+  if (t.includes('privatednszones'))  return '2020-06-01'
+  if (t.includes('network'))          return '2023-09-01'
+  if (t.includes('web/'))             return '2023-12-01'
   return '2023-01-01'
 }
