@@ -212,9 +212,11 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       }),
     }
   )
+  if (!vnetData?.id) throw new Error('VNet creation did not return a resource ID — ARM may have returned 202 without body.')
   const vnetId       = vnetData.id
-  const flexSubnetId = vnetData.properties.subnets.find(s => s.name === 'snet-flex').id
-  const peSubnetId   = vnetData.properties.subnets.find(s => s.name === 'snet-pe').id
+  const flexSubnetId = vnetData.properties.subnets.find(s => s.name === 'snet-flex')?.id
+  const peSubnetId   = vnetData.properties.subnets.find(s => s.name === 'snet-pe')?.id
+  if (!flexSubnetId || !peSubnetId) throw new Error(`Subnet IDs missing from VNet response (flex=${flexSubnetId}, pe=${peSubnetId})`)
   log('Virtual Network created.', 'success')
 
   // ── Step 4: Storage Account (open, hardened after deploy) ─────────────────
@@ -336,7 +338,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   // ── Step 8: Flex Consumption Plan ─────────────────────────────────────────
   log(`Creating Flex Consumption Plan: ${planName}...`)
-  const planData = await armFetch(
+  await armFetch(
     token,
     `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2024-04-01`,
     {
@@ -350,7 +352,15 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       }),
     }
   )
-  const planId = planData.id
+  log('Waiting for Flex Consumption Plan to be ready...')
+  const planFinal = await poll(async () => {
+    const p = await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/serverfarms/${planName}?api-version=2024-04-01`
+    )
+    return p?.properties?.status === 'Ready' ? p : null
+  })
+  const planId = planFinal.id
   log('Flex Consumption Plan created.', 'success')
 
   // ── Step 9: Application Insights ─────────────────────────────────────────
