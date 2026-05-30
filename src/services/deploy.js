@@ -637,6 +637,7 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
     }
   )
   const peId = peData.id
+  if (!peId) throw new Error(`Private endpoint ${peName} returned no resource id.`)
   await poll(async () => {
     try {
       const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
@@ -646,12 +647,15 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
 
   // Private DNS zone (idempotent: a PUT on an existing zone is a no-op upsert,
   // so re-running install or sharing a zone across services is safe).
-  const dnsZoneFinal = await armFetch(
+  // NOTE: the PUT returns asynchronously and its body may omit `id`, so we read
+  // the resource id from the polled GET — which only returns once provisioning
+  // has Succeeded — rather than from the PUT response.
+  await armFetch(
     token,
     `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`,
     { method: 'PUT', body: JSON.stringify({ location: 'global', tags: managedTags, properties: {} }) }
   )
-  await poll(async () => {
+  const dnsZoneFinal = await poll(async () => {
     try {
       const z = await armFetch(
         token,
@@ -661,6 +665,7 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
     } catch { return null }
   })
   const dnsZoneId = dnsZoneFinal.id
+  if (!dnsZoneId) throw new Error(`Private DNS zone ${dnsZoneName} returned no resource id after provisioning.`)
 
   await armFetch(
     token,
