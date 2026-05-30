@@ -255,20 +255,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const storageAccountId = storageData.id
   log('Storage Account ready.', 'success')
 
-  // ── Step 5-pre: Assign storage RBAC immediately so propagation begins ────
-  // The FC1 deployment controller and host both use the UAMI to access storage.
-  // RBAC propagation takes up to 20 minutes; assign as early as possible so
-  // the subsequent steps (CORS wait, zip upload, plan, AI) count toward it.
-  const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
-  log('Assigning storage RBAC roles to Managed Identity...')
-  await Promise.all([
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
-  ])
-  log('Storage RBAC roles assigned.', 'success')
-  const rbacAssignedAt = Date.now()
-
   // ── Step 5: Blob container for deployment package ─────────────────────────
   log('Creating deployment blob container...')
   await armFetch(
@@ -317,6 +303,17 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
   if (!corsReady) throw new Error('Storage CORS did not become available within 2 minutes.')
   log('Blob CORS is live.', 'success')
+
+  // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
+  const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
+  log('Assigning storage RBAC roles to Managed Identity...')
+  await Promise.all([
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
+  ])
+  log('Storage RBAC roles assigned.', 'success')
+  const rbacAssignedAt = Date.now()
 
   // ── Step 7: Upload deployment package via ARM-generated SAS ──────────────
   log('Generating SAS token for package upload...')
@@ -405,7 +402,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   // silently and never retries. Ensure at least 12 minutes have elapsed since
   // RBAC assignment before creating the app.
   {
-    const MIN_RBAC_MS = 20 * 60 * 1000
+    const MIN_RBAC_MS = 12 * 60 * 1000
     const elapsed = Date.now() - rbacAssignedAt
     if (elapsed < MIN_RBAC_MS) {
       const waitS = Math.round((MIN_RBAC_MS - elapsed) / 1000)
@@ -622,47 +619,36 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }, { intervalMs: 5000, timeoutMs: 120000 })
   log('DNS A-record is live.', 'success')
 
-  // ── Step 17: Force FC1 deployment by re-uploading the package blob ──────────
-  // FC1 does not support onedeploy (no Kudu). Deployment is exclusively via
-  // functionAppConfig.deployment.storage. The deployment controller first ran at
-  // app creation (Step 10); RBAC was guaranteed propagated by then. Re-uploading
-  // the zip changes the blob's Last-Modified, which signals the FC1 deployment
-  // infrastructure to re-fetch and extract the package. Then PATCH the app to
-  // additionally nudge the ARM layer to re-sync the deployment config.
-  log('Re-uploading function package to trigger FC1 deployment...')
-  await uploadBlobBlocks(storageAccountName, 'deployment', 'function-app.zip', pkgBuffer, sasToken)
-  log('Package re-uploaded.', 'success')
-  log('Patching Function App to re-sync deployment...')
-  try {
-    await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          properties: {
-            functionAppConfig: {
-              deployment: {
-                storage: {
-                  type: 'blobContainer',
-                  value: `https://${storageAccountName}.blob.core.windows.net/deployment`,
-                  authentication: {
-                    type: 'UserAssignedIdentity',
-                    userAssignedIdentityResourceId: miResourceId,
-                  },
-                },
-              },
-              scaleAndConcurrency: { instanceMemoryMB: 2048, maximumInstanceCount: 100 },
-              runtime: { name: 'powershell', version: '7.4' },
-            },
-          },
-        }),
-      }
-    )
-    log('Deployment re-sync triggered.', 'success')
-  } catch (e) {
-    log(`Deployment re-sync: ${e.message} — blob re-upload should still trigger FC1.`, 'warn')
-  }
+  // ── Step 17: Deploy the package to FC1 via OneDeploy ───────────────────────
+  // Flex Consumption supports exactly ONE deployment path: OneDeploy. Dropping a
+  // zip into the deployment container does NOT deploy it — Azure ignores a blob
+  // that wasn't registered through OneDeploy, which is why the host previously
+  // found no package and failed to load any functions.
+  //
+  // OneDeploy is exposed as the Microsoft.Web/sites/extensions/onedeploy ARM
+  // resource. We point it at the package we already uploaded (Step 7) via a read
+  // SAS URL. The deployment service fetches it, stores it in the deployment
+  // container as the active `released-package.zip`, and the host loads it on the
+  // next start. This is an ARM call, so the browser's management token is enough —
+  // no Kudu/SCM endpoint (which CORS would block) is involved.
+  log('Deploying package to Function App via OneDeploy...')
+  const packageSasUrl = `https://${storageAccountName}.blob.core.windows.net/deployment/function-app.zip?${sasToken}`
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/extensions/onedeploy?api-version=2022-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          // PowerShell dependencies are restored at runtime via host.json
+          // managedDependency, so a remote build is not required here.
+          packageUri: packageSasUrl,
+          remoteBuild: false,
+        },
+      }),
+    }
+  )
+  log('OneDeploy completed — package registered for FC1.', 'success')
 
   // ── Step 18: Wait for host to load all functions (best-effort) ──────────────
   // The ARM /functions API may not populate for FC1 until the first timer fires.
@@ -681,7 +667,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }, { intervalMs: 15000, timeoutMs: 300000 })
     log('Function App confirmed 3 functions loaded.', 'success')
   } catch {
-    log('Function load confirmation timed out — normal for FC1. Giving host 60 more seconds then proceeding...', 'warn')
+    log('Functions did not appear within 5 min. OneDeploy succeeded, so the host is still starting — check "Diagnose and solve problems → Flex Consumption Deployment" if they remain missing. Proceeding...', 'warn')
     await new Promise(r => setTimeout(r, 60000))
   }
 
