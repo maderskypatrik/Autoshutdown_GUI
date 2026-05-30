@@ -608,19 +608,26 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Restart triggered.', 'success')
 
-  // ── Step 18: Wait for host to load all 3 functions ────────────────────────
-  // Confirm the deployment package was successfully read before hardening storage.
+  // ── Step 18: Wait for host to load all functions (best-effort) ──────────────
+  // The ARM /functions API may not populate for FC1 until the first timer fires.
+  // Poll opportunistically — confirm if possible, proceed with a brief extra wait
+  // if it times out so the host has time to read the package before storage locks.
   log('Waiting for Function App to load functions (up to 5 min)...')
-  await poll(async () => {
-    try {
-      const fns = await armFetch(
-        token,
-        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/functions?api-version=2024-04-01`
-      )
-      return (fns?.value?.length ?? 0) >= 3 ? fns : null
-    } catch { return null }
-  }, { intervalMs: 15000, timeoutMs: 300000 })
-  log('Function App loaded 3 functions successfully.', 'success')
+  try {
+    await poll(async () => {
+      try {
+        const fns = await armFetch(
+          token,
+          `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/functions?api-version=2024-04-01`
+        )
+        return (fns?.value?.length ?? 0) >= 3 ? fns : null
+      } catch { return null }
+    }, { intervalMs: 15000, timeoutMs: 300000 })
+    log('Function App confirmed 3 functions loaded.', 'success')
+  } catch {
+    log('Function load confirmation timed out — normal for FC1. Giving host 60 more seconds then proceeding...', 'warn')
+    await new Promise(r => setTimeout(r, 60000))
+  }
 
   // ── Step 19: Storage network restrictions (sa-05) ─────────────────────────
   // Applied AFTER the host confirmed it loaded the package — eliminates the

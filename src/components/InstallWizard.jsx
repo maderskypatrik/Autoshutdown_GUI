@@ -176,7 +176,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
           {step === 3 && (
             <>
               <p className="wizard-intro">
-                {running && 'Deploying Azure resources — this takes 8–10 minutes, please wait…'}
+                {running && 'Deploying Azure resources — this takes 10–15 minutes, please wait…'}
                 {done    && 'Installation complete. The Function App will be ready within a few minutes.'}
                 {failed  && 'Installation encountered an error. Review the log below.'}
               </p>
