@@ -313,6 +313,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
   ])
   log('Storage RBAC roles assigned.', 'success')
+  const rbacAssignedAt = Date.now()
 
   // ── Step 7: Upload deployment package via ARM-generated SAS ──────────────
   log('Generating SAS token for package upload...')
@@ -396,6 +397,19 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log('Application Insights created.', 'success')
 
   // ── Step 10: Function App (Flex Consumption, VNet integrated) ─────────────
+  // FC1's deployment controller downloads the package exactly once at creation
+  // time using the UAMI credentials. If RBAC hasn't propagated yet it fails
+  // silently and never retries. Ensure at least 12 minutes have elapsed since
+  // RBAC assignment before creating the app.
+  {
+    const MIN_RBAC_MS = 12 * 60 * 1000
+    const elapsed = Date.now() - rbacAssignedAt
+    if (elapsed < MIN_RBAC_MS) {
+      const waitS = Math.round((MIN_RBAC_MS - elapsed) / 1000)
+      log(`Waiting ${waitS}s for RBAC to propagate before creating Function App...`)
+      await new Promise(r => setTimeout(r, MIN_RBAC_MS - elapsed))
+    }
+  }
   if (!planId)        throw new Error('planId is null — plan did not return an ARM resource ID')
   if (!flexSubnetId)  throw new Error('flexSubnetId is null — VNet response missing snet-flex ID')
   if (!miResourceId)  throw new Error('miResourceId is null — MI response missing resource ID')
@@ -605,48 +619,44 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }, { intervalMs: 5000, timeoutMs: 120000 })
   log('DNS A-record is live.', 'success')
 
-  // ── Step 17: Deploy function package via onedeploy ──────────────────────────
-  // functionAppConfig.deployment.storage auto-detection is unreliable — the
-  // deployment controller attempts download once at creation time when RBAC may
-  // not yet have propagated. onedeploy is the explicit push path used by
-  // az functionapp deploy and VS Code; it reliably triggers the runtime to
-  // download and extract the zip. By this point ~15 min have elapsed since RBAC
-  // assignment in Step 6, so propagation is complete.
-  log('Deploying function package...')
-  const blobSasUrl = `https://${storageAccountName}.blob.core.windows.net/deployment/function-app.zip?${sasToken}`
+  // ── Step 17: Force FC1 deployment by re-uploading the package blob ──────────
+  // FC1 does not support onedeploy (no Kudu). Deployment is exclusively via
+  // functionAppConfig.deployment.storage. The deployment controller first ran at
+  // app creation (Step 10); RBAC was guaranteed propagated by then. Re-uploading
+  // the zip changes the blob's Last-Modified, which signals the FC1 deployment
+  // infrastructure to re-fetch and extract the package. Then PATCH the app to
+  // additionally nudge the ARM layer to re-sync the deployment config.
+  log('Re-uploading function package to trigger FC1 deployment...')
+  await uploadBlobBlocks(storageAccountName, 'deployment', 'function-app.zip', pkgBuffer, sasToken)
+  log('Package re-uploaded.', 'success')
+  log('Patching Function App to re-sync deployment...')
   try {
-    const deployRes = await fetch(
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/extensions/onedeploy?api-version=2024-04-01`,
+    await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`,
       {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ packageUri: blobSasUrl, type: 'zip', remoteBuild: false }),
+        method: 'PATCH',
+        body: JSON.stringify({
+          properties: {
+            functionAppConfig: {
+              deployment: {
+                storage: {
+                  type: 'blobContainer',
+                  value: `https://${storageAccountName}.blob.core.windows.net/deployment`,
+                  authentication: {
+                    type: 'UserAssignedIdentity',
+                    userAssignedIdentityResourceId: miResourceId,
+                  },
+                },
+              },
+            },
+          },
+        }),
       }
     )
-    if (deployRes.status === 202) {
-      const pollUrl = deployRes.headers.get('location')
-      if (pollUrl) {
-        log('Waiting for deployment to complete...')
-        await poll(async () => {
-          const r = await fetch(pollUrl, { headers: { Authorization: `Bearer ${token}` } })
-          if (r.status === 202) return null
-          if (r.ok) return true
-          throw new Error(`Deployment poll: HTTP ${r.status}`)
-        }, { intervalMs: 10000, timeoutMs: 300000 })
-      }
-      log('Deployment complete.', 'success')
-    } else if (deployRes.ok) {
-      log('Deployment triggered.', 'success')
-    } else {
-      let msg = `HTTP ${deployRes.status}`
-      try { const j = await deployRes.json(); msg += ': ' + (j.error?.message ?? msg) } catch {}
-      log(`Deployment warning: ${msg} — host will fall back to functionAppConfig.deployment.storage`, 'warn')
-    }
+    log('Deployment re-sync triggered.', 'success')
   } catch (e) {
-    log(`Deployment warning: ${e.message} — host will fall back to functionAppConfig.deployment.storage`, 'warn')
+    log(`Deployment re-sync: ${e.message} — blob re-upload should still trigger FC1.`, 'warn')
   }
 
   // ── Step 18: Wait for host to load all functions (best-effort) ──────────────
