@@ -255,6 +255,20 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const storageAccountId = storageData.id
   log('Storage Account ready.', 'success')
 
+  // ── Step 5-pre: Assign storage RBAC immediately so propagation begins ────
+  // The FC1 deployment controller and host both use the UAMI to access storage.
+  // RBAC propagation takes up to 20 minutes; assign as early as possible so
+  // the subsequent steps (CORS wait, zip upload, plan, AI) count toward it.
+  const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
+  log('Assigning storage RBAC roles to Managed Identity...')
+  await Promise.all([
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
+    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
+  ])
+  log('Storage RBAC roles assigned.', 'success')
+  const rbacAssignedAt = Date.now()
+
   // ── Step 5: Blob container for deployment package ─────────────────────────
   log('Creating deployment blob container...')
   await armFetch(
@@ -303,17 +317,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
   if (!corsReady) throw new Error('Storage CORS did not become available within 2 minutes.')
   log('Blob CORS is live.', 'success')
-
-  // ── Step 6: Storage RBAC roles ────────────────────────────────────────────
-  const storageScope = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}`
-  log('Assigning storage RBAC roles to Managed Identity...')
-  await Promise.all([
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_BLOB_DATA_OWNER),
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR),
-    assignRole(token, subId, storageScope, miPrincipalId, ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR),
-  ])
-  log('Storage RBAC roles assigned.', 'success')
-  const rbacAssignedAt = Date.now()
 
   // ── Step 7: Upload deployment package via ARM-generated SAS ──────────────
   log('Generating SAS token for package upload...')
@@ -402,7 +405,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   // silently and never retries. Ensure at least 12 minutes have elapsed since
   // RBAC assignment before creating the app.
   {
-    const MIN_RBAC_MS = 12 * 60 * 1000
+    const MIN_RBAC_MS = 20 * 60 * 1000
     const elapsed = Date.now() - rbacAssignedAt
     if (elapsed < MIN_RBAC_MS) {
       const waitS = Math.round((MIN_RBAC_MS - elapsed) / 1000)
@@ -649,6 +652,8 @@ export async function installAutoShutdown(token, subId, config, onLog) {
                   },
                 },
               },
+              scaleAndConcurrency: { instanceMemoryMB: 2048, maximumInstanceCount: 100 },
+              runtime: { name: 'powershell', version: '7.4' },
             },
           },
         }),
