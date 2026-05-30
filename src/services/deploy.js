@@ -626,6 +626,21 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
   log('Function triggers synced.', 'success')
 
+  // ── Step 19: Restart Function App ─────────────────────────────────────────
+  // Resets the deployment controller so it re-reads the blob container with
+  // all networking and RBAC now in place.
+  log('Restarting Function App...')
+  try {
+    await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/restart?api-version=2024-04-01`,
+      { method: 'POST' }
+    )
+  } catch (e) {
+    log(`Restart: ${e.message}`, 'warn')
+  }
+  log('Function App restarted.', 'success')
+
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
 }
