@@ -10,6 +10,7 @@ const ROLE_WEBSITE_CONTRIBUTOR            = 'de139f84-1756-47ae-9be6-808fbbe8477
 const ROLE_STORAGE_BLOB_DATA_OWNER        = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 const ROLE_STORAGE_QUEUE_DATA_CONTRIBUTOR = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 const ROLE_STORAGE_TABLE_DATA_CONTRIBUTOR = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+const ROLE_MONITORING_METRICS_PUBLISHER   = '3913510d-42f4-4e42-8a64-420c390055eb'
 
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
@@ -391,8 +392,17 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   const aiConnectionString   = aiData.properties.ConnectionString
-  const aiInstrumentationKey = aiData.properties.InstrumentationKey
+  const aiResourceId         = aiData.id
   log('Application Insights created.', 'success')
+
+  // Grant the managed identity rights to publish telemetry to this App Insights
+  // component. Without it, an identity-only (shared-key-disabled) Flex host can
+  // fail to establish its telemetry channel on startup, which prevents the host
+  // from fully initializing — the functions list as Enabled but their timers
+  // never fire and nothing is logged. Scoped to the AI component only.
+  log('Assigning Monitoring Metrics Publisher role on Application Insights...')
+  await assignRole(token, subId, aiResourceId, miPrincipalId, ROLE_MONITORING_METRICS_PUBLISHER)
+  log('Monitoring Metrics Publisher role assigned.', 'success')
 
   // ── Step 10: Function App (Flex Consumption, VNet integrated) ─────────────
   // FC1's deployment controller downloads the package exactly once at creation
@@ -455,7 +465,12 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'AzureWebJobsStorage__clientId',             value: miClientId },
               { name: 'USER_ASSIGNED_MI_CLIENT_ID',                value: miClientId },
               { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING',     value: aiConnectionString },
-              { name: 'APPINSIGHTS_INSTRUMENTATIONKEY',            value: aiInstrumentationKey },
+              // Authenticate telemetry via the user-assigned MI (Entra), matching the
+              // identity-only posture (shared key disabled). Requires the Monitoring
+              // Metrics Publisher role granted above. The connection string is still
+              // required; the instrumentation key is intentionally omitted (the host
+              // must not be given both the key and the connection string).
+              { name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING', value: `ClientId=${miClientId};Authorization=AAD` },
               { name: 'WHATIF',                                    value: 'false' },
               { name: 'WINDOW_MINUTES',                            value: '15' },
               { name: 'TIMEZONE',                                  value: timezone },
