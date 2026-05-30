@@ -699,6 +699,7 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
         query: `Resources
 | where subscriptionId =~ '${subId}'
 | where tags['${MANAGED_TAG_KEY}'] =~ '${MANAGED_TAG_VAL}'
+| where resourceGroup =~ '${installation.resourceGroup}'
 | project id, name, type, resourceGroup`,
         subscriptions: [subId],
       }),
@@ -724,6 +725,28 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
     log('Role assignments removed.', 'success')
   }
 
+  // Delete DNS zone VNet links explicitly — they are sub-resources not returned by
+  // Resource Graph, and the zone DELETE fails if links still exist.
+  const dnsZones = resources.filter(r => r.type.toLowerCase().includes('privatednszones'))
+  for (const zone of dnsZones) {
+    try {
+      const linksData = await armFetch(
+        token,
+        `${ARM}${zone.id}/virtualNetworkLinks?api-version=2020-06-01`
+      )
+      for (const link of linksData?.value ?? []) {
+        log(`  Removing DNS VNet link: ${link.name}`)
+        try {
+          await armFetch(token, `${ARM}${link.id}?api-version=2020-06-01`, { method: 'DELETE' })
+        } catch (e) {
+          log(`  Warning: could not remove link ${link.name}: ${e.message}`, 'warn')
+        }
+      }
+    } catch (e) {
+      log(`  Warning: could not list DNS VNet links for ${zone.name}: ${e.message}`, 'warn')
+    }
+  }
+
   const typeOrder = [
     'microsoft.web/sites',
     'microsoft.web/serverfarms',
@@ -746,6 +769,18 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
     log(`Deleting ${label}...`)
     try {
       await armFetch(token, `${ARM}${res.id}?api-version=${apiVersionFor(res.type)}`, { method: 'DELETE' })
+
+      // Private endpoint deletion is async — the subnet stays "in use" until it completes.
+      // Wait for the PE to disappear before moving on so VNet deletion doesn't fail.
+      if (res.type.toLowerCase() === 'microsoft.network/privateendpoints') {
+        await poll(async () => {
+          try {
+            await armFetch(token, `${ARM}${res.id}?api-version=${apiVersionFor(res.type)}`)
+            return null
+          } catch { return true }
+        }, { intervalMs: 5000, timeoutMs: 120000 }).catch(() => {})
+      }
+
       log(`  Deleted: ${res.name}`, 'success')
     } catch (e) {
       log(`  Warning: ${e.message}`, 'warn')
