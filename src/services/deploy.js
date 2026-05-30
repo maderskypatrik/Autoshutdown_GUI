@@ -333,9 +333,17 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   const sasToken = sasData.accountSasToken
   log('Downloading function package...')
-  const pkgRes = await fetch(`${window.location.origin}/function-app.zip`)
-  if (!pkgRes.ok) throw new Error(`Failed to fetch function-app.zip: HTTP ${pkgRes.status}`)
-  const pkgBuffer = await pkgRes.arrayBuffer()
+  let pkgBuffer
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const pkgRes = await fetch(`${window.location.origin}/function-app.zip`)
+    if (pkgRes.ok) { pkgBuffer = await pkgRes.arrayBuffer(); break }
+    if (pkgRes.status >= 500 && attempt < 4) {
+      log(`Package download returned HTTP ${pkgRes.status} — retrying in 30 s (attempt ${attempt}/4)...`, 'warn')
+      await new Promise(r => setTimeout(r, 30000))
+      continue
+    }
+    throw new Error(`Failed to fetch function-app.zip: HTTP ${pkgRes.status}`)
+  }
   log(`Package downloaded (${Math.round(pkgBuffer.byteLength / 1024 / 1024)} MB). Uploading to storage...`)
   await uploadBlobBlocks(storageAccountName, 'deployment', 'function-app.zip', pkgBuffer, sasToken)
   log('Package uploaded to blob storage.', 'success')
