@@ -597,16 +597,49 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }, { intervalMs: 5000, timeoutMs: 120000 })
   log('DNS A-record is live.', 'success')
 
-  // ── Step 17: Restart Function App — initial package load (storage still public) ──
-  // The host cold-starts, downloads function-app.zip from blob (no network ACL yet),
-  // and registers functions. We verify it succeeded before locking storage down.
-  log('Restarting Function App to trigger initial package load...')
-  await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/restart?api-version=2024-04-01`,
-    { method: 'POST' }
-  )
-  log('Restart triggered.', 'success')
+  // ── Step 17: Deploy function package via onedeploy ──────────────────────────
+  // functionAppConfig.deployment.storage auto-detection is unreliable — the
+  // deployment controller attempts download once at creation time when RBAC may
+  // not yet have propagated. onedeploy is the explicit push path used by
+  // az functionapp deploy and VS Code; it reliably triggers the runtime to
+  // download and extract the zip. By this point ~15 min have elapsed since RBAC
+  // assignment in Step 6, so propagation is complete.
+  log('Deploying function package...')
+  const blobSasUrl = `https://${storageAccountName}.blob.core.windows.net/deployment/function-app.zip?${sasToken}`
+  try {
+    const deployRes = await fetch(
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/extensions/onedeploy?api-version=2024-04-01`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ packageUri: blobSasUrl, type: 'zip', remoteBuild: false }),
+      }
+    )
+    if (deployRes.status === 202) {
+      const pollUrl = deployRes.headers.get('location')
+      if (pollUrl) {
+        log('Waiting for deployment to complete...')
+        await poll(async () => {
+          const r = await fetch(pollUrl, { headers: { Authorization: `Bearer ${token}` } })
+          if (r.status === 202) return null
+          if (r.ok) return true
+          throw new Error(`Deployment poll: HTTP ${r.status}`)
+        }, { intervalMs: 10000, timeoutMs: 300000 })
+      }
+      log('Deployment complete.', 'success')
+    } else if (deployRes.ok) {
+      log('Deployment triggered.', 'success')
+    } else {
+      let msg = `HTTP ${deployRes.status}`
+      try { const j = await deployRes.json(); msg += ': ' + (j.error?.message ?? msg) } catch {}
+      log(`Deployment warning: ${msg} — host will fall back to functionAppConfig.deployment.storage`, 'warn')
+    }
+  } catch (e) {
+    log(`Deployment warning: ${e.message} — host will fall back to functionAppConfig.deployment.storage`, 'warn')
+  }
 
   // ── Step 18: Wait for host to load all functions (best-effort) ──────────────
   // The ARM /functions API may not populate for FC1 until the first timer fires.
