@@ -129,8 +129,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const planName    = 'plan-autoshutdown'
   const vnetName    = 'vnet-autoshutdown'
   const nsgName     = 'nsg-autoshutdown'
-  const peName      = 'pe-autoshutdown-blob'
-  const dnsZoneName = 'privatelink.blob.core.windows.net'
   const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
 
   // ── Step 1: Managed Identity ───────────────────────────────────────────────
@@ -504,120 +502,19 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_WEBSITE_CONTRIBUTOR)
   log('Website Contributor role assigned.', 'success')
 
-  // ── Step 12: Private endpoint for blob (sa-04) ────────────────────────────
-  log('Creating private endpoint for blob storage (sa-04)...')
-  const peData = await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateEndpoints/${peName}?api-version=2023-09-01`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        location,
-        tags: managedTags,
-        properties: {
-          subnet: { id: peSubnetId },
-          privateLinkServiceConnections: [
-            {
-              name: 'plsc-blob',
-              properties: {
-                privateLinkServiceId: storageAccountId,
-                groupIds: ['blob'],
-              },
-            },
-          ],
-        },
-      }),
-    }
-  )
-  const peId = peData.id
-  log('Waiting for private endpoint to provision...')
-  await poll(async () => {
-    try {
-      const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
-      return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
-    } catch { return null }
-  })
-  log('Private endpoint ready.', 'success')
-
-  // ── Step 13: Private DNS zone ─────────────────────────────────────────────
-  log(`Creating private DNS zone (${dnsZoneName})...`)
-  await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        location: 'global',
-        tags: managedTags,
-        properties: {},
-      }),
-    }
-  )
-  const dnsZoneFinal = await poll(async () => {
-    try {
-      const z = await armFetch(
-        token,
-        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`
-      )
-      return z?.properties?.provisioningState === 'Succeeded' ? z : null
-    } catch { return null }
-  })
-  const dnsZoneId = dnsZoneFinal.id
-  log('Private DNS zone created.', 'success')
-
-  // ── Step 14: DNS zone VNet link ───────────────────────────────────────────
-  log('Linking DNS zone to VNet...')
-  await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/virtualNetworkLinks/link-autoshutdown?api-version=2020-06-01`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        location: 'global',
-        properties: {
-          virtualNetwork: { id: vnetId },
-          registrationEnabled: false,
-        },
-      }),
-    }
-  )
-  log('DNS zone linked to VNet.', 'success')
-
-  // ── Step 15: DNS zone group on private endpoint ───────────────────────────
-  log('Creating DNS zone group...')
-  await armFetch(
-    token,
-    `${ARM}${peId}/privateDnsZoneGroups/default?api-version=2023-09-01`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        properties: {
-          privateDnsZoneConfigs: [
-            {
-              name: 'config-blob',
-              properties: { privateDnsZoneId: dnsZoneId },
-            },
-          ],
-        },
-      }),
-    }
-  )
-  log('DNS zone group created.', 'success')
-
-  // ── Step 16: Wait for private endpoint DNS A-record to propagate ──────────
-  // DNS zone group creation is async — verify the A record exists before
-  // locking storage so the host can resolve the private endpoint on cold-start.
-  log('Waiting for private endpoint DNS A-record to propagate...')
-  await poll(async () => {
-    try {
-      const rec = await armFetch(
-        token,
-        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/A/${storageAccountName}?api-version=2020-06-01`
-      )
-      return rec?.properties?.aRecords?.length > 0 ? rec : null
-    } catch { return null }
-  }, { intervalMs: 5000, timeoutMs: 120000 })
-  log('DNS A-record is live.', 'success')
+  // ── Step 12: Private endpoints for blob, queue, and table (sa-04) ──────────
+  // The Flex Consumption host uses all three storage services for AzureWebJobsStorage
+  // (blob for the package/host state, queue + table for runtime coordination and
+  // timer-trigger bookkeeping). Once the storage firewall is set to Deny (Step 19),
+  // each service is only reachable through its own private endpoint. Endpointing
+  // blob alone — the previous behaviour — left queue and table blocked, which is
+  // what produced the "could not load functions" error after lockdown.
+  const peOpts = {
+    location, storageAccountId, storageAccountName, peSubnetId, vnetId, managedTags,
+  }
+  for (const service of ['blob', 'queue', 'table']) {
+    await createStoragePrivateEndpoint(token, subId, resourceGroup, { ...peOpts, service }, log)
+  }
 
   // ── Step 17: Deploy the package to FC1 via OneDeploy ───────────────────────
   // Flex Consumption supports exactly ONE deployment path: OneDeploy. Dropping a
@@ -706,6 +603,103 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
+}
+
+// Provisions a private endpoint + private DNS zone (+ VNet link, zone group) for a
+// single storage subresource (blob | queue | table), then waits for the A-record to
+// resolve. Flex Consumption's host reaches blob/queue/table over these private paths
+// once the storage firewall is set to Deny; without an endpoint for a given service,
+// that service becomes unreachable and the host reports function-load errors.
+async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, log) {
+  const { service, location, storageAccountId, storageAccountName, peSubnetId, vnetId, managedTags } = opts
+  const peName     = `pe-autoshutdown-${service}`
+  const dnsZoneName = `privatelink.${service}.core.windows.net`
+
+  log(`Creating private endpoint for ${service} storage...`)
+  const peData = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateEndpoints/${peName}?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        tags: managedTags,
+        properties: {
+          subnet: { id: peSubnetId },
+          privateLinkServiceConnections: [
+            {
+              name: `plsc-${service}`,
+              properties: { privateLinkServiceId: storageAccountId, groupIds: [service] },
+            },
+          ],
+        },
+      }),
+    }
+  )
+  const peId = peData.id
+  await poll(async () => {
+    try {
+      const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
+      return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
+    } catch { return null }
+  })
+
+  // Private DNS zone (idempotent: a PUT on an existing zone is a no-op upsert,
+  // so re-running install or sharing a zone across services is safe).
+  const dnsZoneFinal = await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`,
+    { method: 'PUT', body: JSON.stringify({ location: 'global', tags: managedTags, properties: {} }) }
+  )
+  await poll(async () => {
+    try {
+      const z = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}?api-version=2020-06-01`
+      )
+      return z?.properties?.provisioningState === 'Succeeded' ? z : null
+    } catch { return null }
+  })
+  const dnsZoneId = dnsZoneFinal.id
+
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/virtualNetworkLinks/link-autoshutdown?api-version=2020-06-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location: 'global',
+        properties: { virtualNetwork: { id: vnetId }, registrationEnabled: false },
+      }),
+    }
+  )
+
+  await armFetch(
+    token,
+    `${ARM}${peId}/privateDnsZoneGroups/default?api-version=2023-09-01`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        properties: {
+          privateDnsZoneConfigs: [
+            { name: `config-${service}`, properties: { privateDnsZoneId: dnsZoneId } },
+          ],
+        },
+      }),
+    }
+  )
+
+  // Wait for the A-record so the host can resolve this service before storage locks.
+  await poll(async () => {
+    try {
+      const rec = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/A/${storageAccountName}?api-version=2020-06-01`
+      )
+      return rec?.properties?.aRecords?.length > 0 ? rec : null
+    } catch { return null }
+  }, { intervalMs: 5000, timeoutMs: 120000 })
+  log(`Private endpoint for ${service} ready (DNS live).`, 'success')
 }
 
 async function assignRole(token, subId, scope, principalId, roleDefId) {
