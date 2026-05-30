@@ -196,7 +196,11 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               properties: {
                 addressPrefix: '10.200.1.0/24',
                 networkSecurityGroup: { id: nsgId },
-                serviceEndpoints: [{ service: 'Microsoft.Storage' }],
+                // FC1 requires delegation to Microsoft.App/environments for VNet integration
+                delegations: [{
+                  name: 'delegation-flexconsumption',
+                  properties: { serviceName: 'Microsoft.App/environments' },
+                }],
               },
             },
             {
@@ -437,7 +441,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               { name: 'TIMEZONE',                                  value: timezone },
               { name: 'VERSION',                                   value: (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0') },
               { name: 'FUNCTION_APP_RESOURCE_ID',                  value: `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}` },
-              { name: 'WEBSITE_DNS_SERVER',                        value: '168.63.129.16' },
             ],
           },
         },
@@ -579,7 +582,49 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('DNS zone group created.', 'success')
 
-  // ── Step 16: Storage network restrictions (sa-05) ─────────────────────────
+  // ── Step 16: Wait for private endpoint DNS A-record to propagate ──────────
+  // DNS zone group creation is async — verify the A record exists before
+  // locking storage so the host can resolve the private endpoint on cold-start.
+  log('Waiting for private endpoint DNS A-record to propagate...')
+  await poll(async () => {
+    try {
+      const rec = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Network/privateDnsZones/${dnsZoneName}/A/${storageAccountName}?api-version=2020-06-01`
+      )
+      return rec?.properties?.aRecords?.length > 0 ? rec : null
+    } catch { return null }
+  }, { intervalMs: 5000, timeoutMs: 120000 })
+  log('DNS A-record is live.', 'success')
+
+  // ── Step 17: Restart Function App — initial package load (storage still public) ──
+  // The host cold-starts, downloads function-app.zip from blob (no network ACL yet),
+  // and registers functions. We verify it succeeded before locking storage down.
+  log('Restarting Function App to trigger initial package load...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/restart?api-version=2024-04-01`,
+    { method: 'POST' }
+  )
+  log('Restart triggered.', 'success')
+
+  // ── Step 18: Wait for host to load all 3 functions ────────────────────────
+  // Confirm the deployment package was successfully read before hardening storage.
+  log('Waiting for Function App to load functions (up to 5 min)...')
+  await poll(async () => {
+    try {
+      const fns = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/functions?api-version=2024-04-01`
+      )
+      return (fns?.value?.length ?? 0) >= 3 ? fns : null
+    } catch { return null }
+  }, { intervalMs: 15000, timeoutMs: 300000 })
+  log('Function App loaded 3 functions successfully.', 'success')
+
+  // ── Step 19: Storage network restrictions (sa-05) ─────────────────────────
+  // Applied AFTER the host confirmed it loaded the package — eliminates the
+  // DNS / RBAC race that prevented the first cold-start from reading the blob.
   log('Applying storage network restrictions (sa-05)...')
   await armFetch(
     token,
@@ -591,7 +636,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
           networkAcls: {
             defaultAction: 'Deny',
             bypass: 'AzureServices,Logging,Metrics',
-            virtualNetworkRules: [{ id: flexSubnetId, action: 'Allow' }],
           },
         },
       }),
@@ -599,7 +643,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Network restrictions applied.', 'success')
 
-  // ── Step 17: Disable Shared Key (sa-07) ───────────────────────────────────
+  // ── Step 20: Disable Shared Key (sa-07) ───────────────────────────────────
   log('Disabling Shared Key access (sa-07)...')
   await armFetch(
     token,
@@ -610,36 +654,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     }
   )
   log('Shared Key access disabled.', 'success')
-
-  // ── Step 18: Sync function triggers ──────────────────────────────────────
-  // Tells the Flex Consumption scale controller to pick up function definitions
-  // from the deployment package now that all infrastructure is in place.
-  log('Syncing function triggers...')
-  try {
-    await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/syncfunctiontriggers?api-version=2023-12-01`,
-      { method: 'POST' }
-    )
-  } catch (e) {
-    log(`Trigger sync: ${e.message}`, 'warn')
-  }
-  log('Function triggers synced.', 'success')
-
-  // ── Step 19: Restart Function App ─────────────────────────────────────────
-  // Resets the deployment controller so it re-reads the blob container with
-  // all networking and RBAC now in place.
-  log('Restarting Function App...')
-  try {
-    await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}/restart?api-version=2024-04-01`,
-      { method: 'POST' }
-    )
-  } catch (e) {
-    log(`Restart: ${e.message}`, 'warn')
-  }
-  log('Function App restarted.', 'success')
 
   log('Installation complete!', 'success')
   return { functionAppName, resourceGroup, location }
