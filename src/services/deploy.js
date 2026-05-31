@@ -40,14 +40,14 @@ async function armFetch(token, url, options = {}) {
   try { return await res.json() } catch { return null }
 }
 
-async function poll(fn, { intervalMs = 5000, timeoutMs = 180000 } = {}) {
+async function poll(fn, { intervalMs = 5000, timeoutMs = 180000, label = 'resource' } = {}) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const result = await fn()
     if (result) return result
     await new Promise(r => setTimeout(r, intervalMs))
   }
-  throw new Error('Timed out waiting for resource to provision.')
+  throw new Error(`Timed out waiting for ${label} to provision (after ${Math.round(timeoutMs / 1000)}s).`)
 }
 
 async function uploadBlobBlocks(accountName, containerName, blobName, arrayBuffer, sasToken) {
@@ -667,12 +667,17 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
   )
   const peId = peData.id
   if (!peId) throw new Error(`Private endpoint ${peName} returned no resource id.`)
+  // Private endpoints on a single storage account are sometimes serialized/throttled
+  // by Azure when created back-to-back (blob→queue→table here), so the later ones can
+  // take well over the default 3 min. Allow up to 10 min, and fail fast on a genuine
+  // 'Failed' state instead of silently waiting out the clock.
   await poll(async () => {
-    try {
-      const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
-      return pe?.properties?.provisioningState === 'Succeeded' ? pe : null
-    } catch { return null }
-  })
+    const pe = await armFetch(token, `${ARM}${peId}?api-version=2023-09-01`)
+    const state = pe?.properties?.provisioningState
+    if (state === 'Succeeded') return pe
+    if (state === 'Failed') throw new Error(`Private endpoint ${peName} provisioning Failed (Azure reported state=Failed).`)
+    return null
+  }, { intervalMs: 5000, timeoutMs: 600000, label: `private endpoint ${peName}` })
 
   // Private DNS zone (idempotent: a PUT on an existing zone is a no-op upsert,
   // so re-running install or sharing a zone across services is safe).
@@ -692,7 +697,7 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
       )
       return z?.properties?.provisioningState === 'Succeeded' ? z : null
     } catch { return null }
-  })
+  }, { intervalMs: 5000, timeoutMs: 300000, label: `DNS zone ${dnsZoneName}` })
   const dnsZoneId = dnsZoneFinal.id
   if (!dnsZoneId) throw new Error(`Private DNS zone ${dnsZoneName} returned no resource id after provisioning.`)
 
@@ -732,7 +737,7 @@ async function createStoragePrivateEndpoint(token, subId, resourceGroup, opts, l
       )
       return rec?.properties?.aRecords?.length > 0 ? rec : null
     } catch { return null }
-  }, { intervalMs: 5000, timeoutMs: 120000 })
+  }, { intervalMs: 5000, timeoutMs: 180000, label: `${service} DNS A-record` })
   log(`Private endpoint for ${service} ready (DNS live).`, 'success')
 }
 
