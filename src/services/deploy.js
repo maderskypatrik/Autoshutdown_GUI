@@ -217,36 +217,31 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
   log('Automation Account created and identity verified.', 'success')
 
-  // ── Step 4: Import Az modules (best-effort) ────────────────────────────────
-  // PowerShell 7.2 runbooks ship with the Az module preinstalled, so these imports
-  // are usually redundant. We still attempt them (in case a needed version isn't
-  // present) but treat failure/slowness as non-fatal rather than aborting a
-  // working install. If a runbook later errors on a missing module, import it
-  // explicitly from the portal.
+  // ── Step 4: Import Az modules ─────────────────────────────────────────────
+  // Az.Accounts and Az.Compute are usually preinstalled in the PS 7.2 runtime
+  // and are imported best-effort. Az.ResourceGraph is NOT preinstalled and is
+  // required — Search-AzGraph will fail at runtime without it. We block until
+  // it is confirmed Succeeded before publishing runbooks.
   const modules = [
-    { name: 'Az.Accounts',      uri: 'https://www.powershellgallery.com/api/v2/package/Az.Accounts' },
-    { name: 'Az.Compute',       uri: 'https://www.powershellgallery.com/api/v2/package/Az.Compute' },
-    { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph' },
+    { name: 'Az.Accounts',      uri: 'https://www.powershellgallery.com/api/v2/package/Az.Accounts',      required: false },
+    { name: 'Az.Compute',       uri: 'https://www.powershellgallery.com/api/v2/package/Az.Compute',       required: false },
+    { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph', required: true  },
   ]
   for (const m of modules) {
+    log(`Importing module ${m.name}${m.required ? '' : ' (best-effort)'}...`)
+    const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/modules/${m.name}?api-version=${AA_API}`
     try {
-      log(`Ensuring module ${m.name} (best-effort)...`)
-      const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/modules/${m.name}?api-version=${AA_API}`
       await armFetch(token, modUrl, { method: 'PUT', body: JSON.stringify({ properties: { contentLink: { uri: m.uri } } }) })
       await poll(async () => {
-        try {
-          const r = await armFetch(token, modUrl)
-          const s = r?.properties?.provisioningState
-          if (s === 'Failed') throw new Error('import Failed')
-          return s === 'Succeeded' ? r : null
-        } catch (e) {
-          if (/import Failed/.test(e.message)) throw e
-          return null
-        }
+        const r = await armFetch(token, modUrl)
+        const s = r?.properties?.provisioningState
+        if (s === 'Failed') throw new Error(`Module ${m.name} import Failed.`)
+        return s === 'Succeeded' ? r : null
       }, { intervalMs: 10000, timeoutMs: 600000, label: `module ${m.name}` })
       log(`Module ${m.name} ready.`, 'success')
     } catch (e) {
-      log(`Module ${m.name} import skipped (runtime likely already provides it): ${e.message}`, 'warn')
+      if (m.required) throw new Error(`Required module ${m.name} failed to import: ${e.message}`)
+      log(`Module ${m.name} skipped (runtime likely provides it): ${e.message}`, 'warn')
     }
   }
 
