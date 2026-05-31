@@ -22,7 +22,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
   const [step, setStep]               = useState(1) // 1=ToU, 2=Config, 3=Progress
   const [agreed, setAgreed]           = useState(false)
   const [rg, setRg]                   = useState(resourceGroups[0]?.name ?? '')
-  const [funcName, setFuncName]       = useState('func-autoshutdown')
+  const [funcName, setFuncName]       = useState('aa-autoshutdown')
   const [timezone, setTimezone]       = useState('Central European Standard Time')
   const [running, setRunning]         = useState(false)
   const [done, setDone]               = useState(false)
