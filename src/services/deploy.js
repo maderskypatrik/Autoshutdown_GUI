@@ -217,28 +217,37 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
   log('Automation Account created and identity verified.', 'success')
 
-  // ── Step 4: Import Az modules (ordered; Az.Accounts first) ─────────────────
+  // ── Step 4: Import Az modules (best-effort) ────────────────────────────────
+  // PowerShell 7.2 runbooks ship with the Az module preinstalled, so these imports
+  // are usually redundant. We still attempt them (in case a needed version isn't
+  // present) but treat failure/slowness as non-fatal rather than aborting a
+  // working install. If a runbook later errors on a missing module, import it
+  // explicitly from the portal.
   const modules = [
     { name: 'Az.Accounts',      uri: 'https://www.powershellgallery.com/api/v2/package/Az.Accounts' },
     { name: 'Az.Compute',       uri: 'https://www.powershellgallery.com/api/v2/package/Az.Compute' },
     { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph' },
   ]
   for (const m of modules) {
-    log(`Importing module ${m.name} (can take several minutes)...`)
-    const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/modules/${m.name}?api-version=${AA_API}`
-    await armFetch(token, modUrl, { method: 'PUT', body: JSON.stringify({ properties: { contentLink: { uri: m.uri } } }) })
-    await poll(async () => {
-      try {
-        const r = await armFetch(token, modUrl)
-        const s = r?.properties?.provisioningState
-        if (s === 'Failed') throw new Error(`Module ${m.name} import Failed.`)
-        return s === 'Succeeded' ? r : null
-      } catch (e) {
-        if (/import Failed/.test(e.message)) throw e
-        return null
-      }
-    }, { intervalMs: 10000, timeoutMs: 900000, label: `module ${m.name}` })
-    log(`Module ${m.name} imported.`, 'success')
+    try {
+      log(`Ensuring module ${m.name} (best-effort)...`)
+      const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/modules/${m.name}?api-version=${AA_API}`
+      await armFetch(token, modUrl, { method: 'PUT', body: JSON.stringify({ properties: { contentLink: { uri: m.uri } } }) })
+      await poll(async () => {
+        try {
+          const r = await armFetch(token, modUrl)
+          const s = r?.properties?.provisioningState
+          if (s === 'Failed') throw new Error('import Failed')
+          return s === 'Succeeded' ? r : null
+        } catch (e) {
+          if (/import Failed/.test(e.message)) throw e
+          return null
+        }
+      }, { intervalMs: 10000, timeoutMs: 600000, label: `module ${m.name}` })
+      log(`Module ${m.name} ready.`, 'success')
+    } catch (e) {
+      log(`Module ${m.name} import skipped (runtime likely already provides it): ${e.message}`, 'warn')
+    }
   }
 
   // ── Step 5: Create + publish runbooks (content fetched from SWA origin) ────
@@ -262,7 +271,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
         location,
         tags: managedTags,
         properties: {
-          runbookType: 'PowerShell',
+          runbookType: 'PowerShell72',
           logVerbose: false,
           logProgress: false,
           publishContentLink: { uri: contentUrl, contentHash: { algorithm: 'SHA256', value: hash } },
