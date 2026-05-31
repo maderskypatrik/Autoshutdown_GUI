@@ -88,8 +88,6 @@ Write-Log "Auto-Shutdown triggered. Local=$($Now.ToString('HH:mm')) TZ=$TimeZone
 
 #region ── Resource Graph discovery ─────────────────────────────────────────────
 
-Import-Module Az.ResourceGraph -ErrorAction Stop
-
 $query = @"
 Resources
 | where type =~ 'microsoft.compute/virtualmachines'

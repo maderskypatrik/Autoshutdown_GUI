@@ -81,8 +81,6 @@ Write-Log "Auto-Startup triggered. Local=$($Now.ToString('HH:mm')) TZ=$TimeZoneI
 
 #region ── Resource Graph discovery ─────────────────────────────────────────────
 
-Import-Module Az.ResourceGraph -ErrorAction Stop
-
 $query = @"
 Resources
 | where type =~ 'microsoft.compute/virtualmachines'
