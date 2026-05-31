@@ -498,6 +498,32 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   )
   log('Function App created.', 'success')
 
+  // ── Step 10a: Verify the app's EFFECTIVE identity matches the one we assigned ──
+  // A fixed-name user-assigned identity (mi-autoshutdown) gets a NEW principalId
+  // each time it is deleted+recreated across uninstall/reinstall cycles. If the
+  // value we assigned roles to has drifted from the principal actually bound to the
+  // running app, the app authenticates as a principal with zero roles — storage
+  // 403s, host never stabilizes, VMs never start. Read the effective identity back
+  // from ARM and assert it matches before proceeding; fail loudly if not.
+  const siteIdentity = await poll(async () => {
+    try {
+      const site = await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${functionAppName}?api-version=2024-04-01`
+      )
+      const uai = site?.identity?.userAssignedIdentities ?? {}
+      const entry = Object.values(uai)[0]
+      return entry?.principalId ? entry : null
+    } catch { return null }
+  }, { intervalMs: 5000, timeoutMs: 120000, label: 'Function App effective identity' })
+  if (siteIdentity.principalId.toLowerCase() !== miPrincipalId.toLowerCase()) {
+    throw new Error(
+      `Identity mismatch: roles were assigned to principal ${miPrincipalId}, but the Function App is running as ${siteIdentity.principalId}. ` +
+      `This happens when a leftover identity from a prior install was reused. Uninstall, then in the portal/CLI confirm no 'mi-autoshutdown' identity or its stale role assignments remain, and reinstall.`
+    )
+  }
+  log('Verified Function App identity matches assigned roles.', 'success')
+
   // ── Step 10b: Attach Swift VNet integration via virtualNetworkConnections ──
   // This is the endpoint Azure CLI (az functionapp vnet-integration add) uses.
   // networkConfig/virtualNetwork and site PATCH both return empty 400 for FC1.
@@ -785,17 +811,34 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
 
   if (miPrincipalId) {
     log('Removing RBAC role assignments...')
+    // Resolve every principal this install may have used: the stored one PLUS the
+    // live principal of any surviving mi-autoshutdown identity (the stored value can
+    // be stale/wrong from older installs, which is how orphaned assignments built up
+    // and caused identity-mismatch failures). Clean assignments for all of them.
+    const principals = new Set([miPrincipalId.toLowerCase()])
     try {
-      const raData = await armFetch(
+      const miList = await armFetch(
         token,
-        `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$filter=principalId eq '${miPrincipalId}'`
+        `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities?api-version=2023-01-31`
       )
-      for (const ra of raData?.value ?? []) {
-        await armFetch(token, `${ARM}${ra.id}?api-version=2022-04-01`, { method: 'DELETE' })
-        log(`  Removed: ${ra.id.split('/').at(-1)}`)
+      for (const mi of miList?.value ?? []) {
+        if (mi?.properties?.principalId) principals.add(mi.properties.principalId.toLowerCase())
       }
-    } catch (e) {
-      log(`  Warning: could not fully remove role assignments: ${e.message}`, 'warn')
+    } catch { /* identity may already be gone */ }
+
+    for (const pid of principals) {
+      try {
+        const raData = await armFetch(
+          token,
+          `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$filter=principalId eq '${pid}'`
+        )
+        for (const ra of raData?.value ?? []) {
+          await armFetch(token, `${ARM}${ra.id}?api-version=2022-04-01`, { method: 'DELETE' })
+          log(`  Removed: ${ra.id.split('/').at(-1)}`)
+        }
+      } catch (e) {
+        log(`  Warning: could not fully remove role assignments for ${pid}: ${e.message}`, 'warn')
+      }
     }
     log('Role assignments removed.', 'success')
   }
