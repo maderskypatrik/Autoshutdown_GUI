@@ -133,15 +133,29 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
 
   // ── Step 1: Managed Identity ───────────────────────────────────────────────
+  // NOTE: creating a user-assigned MI is asynchronous on the AAD side. The create
+  // PUT response frequently returns properties WITHOUT principalId populated (or
+  // not yet stable). Assigning roles using that premature value silently pins the
+  // assignments to a non-existent/wrong principal, so the running identity ends up
+  // with zero effective permissions (manifesting later as storage 403s, failed
+  // singleton-lock renewal, and timers that never fire). We therefore PUT to
+  // create, then GET-poll until principalId is present before using it anywhere.
   log('Creating User-Assigned Managed Identity...')
-  const miData = await armFetch(
-    token,
-    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${miName}?api-version=2023-01-31`,
-    { method: 'PUT', body: JSON.stringify({ location, tags: managedTags }) }
-  )
+  const miUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${miName}?api-version=2023-01-31`
+  await armFetch(token, miUrl, { method: 'PUT', body: JSON.stringify({ location, tags: managedTags }) })
+
+  const miData = await poll(async () => {
+    try {
+      const mi = await armFetch(token, miUrl)
+      // Require BOTH ids to be present; principalId is the async one.
+      return (mi?.properties?.principalId && mi?.properties?.clientId) ? mi : null
+    } catch { return null }
+  }, { intervalMs: 5000, timeoutMs: 180000 })
+
   const miResourceId  = miData.id
   const miClientId    = miData.properties.clientId
   const miPrincipalId = miData.properties.principalId
+  if (!miPrincipalId) throw new Error('Managed Identity principalId did not populate; aborting before role assignment.')
   log(`Managed Identity created (principal: ${miPrincipalId})`, 'success')
 
   // ── Step 2: NSG ───────────────────────────────────────────────────────────
