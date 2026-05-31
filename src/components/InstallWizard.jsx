@@ -85,26 +85,21 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
           {step === 1 && (
             <>
               <p className="wizard-intro">
-                Before installing the AutoShutdown Function App into your Azure subscription, please read and accept the Terms of Use.
+                Before installing AutoShutdown into your Azure subscription, please read and accept the Terms of Use.
               </p>
               <div className="tou-box">
                 <p><strong>What will be installed:</strong></p>
                 <ul>
                   <li>User-Assigned Managed Identity</li>
-                  <li>Network Security Group + Virtual Network (two subnets)</li>
-                  <li>Storage Account (Standard LRS) with private endpoint and network restrictions</li>
-                  <li>Flex Consumption Plan + Function App (PowerShell 7.4, runs every 15 minutes)</li>
-                  <li>Application Insights</li>
-                  <li>Private DNS Zone (privatelink.blob.core.windows.net)</li>
+                  <li>Azure Automation Account with PowerShell runbooks (runs every 15 minutes)</li>
                 </ul>
-                <p><strong>Permissions granted to the Function App:</strong></p>
+                <p><strong>Permissions granted to the Automation Account:</strong></p>
                 <ul>
                   <li>Virtual Machine Contributor at subscription scope</li>
                   <li>Reader at subscription scope</li>
-                  <li>Website Contributor at resource group scope (required for self-update)</li>
-                  <li>Storage Blob Data Owner, Queue Data Contributor, Table Data Contributor at storage account scope</li>
+                  <li>Automation Contributor at Automation Account scope (required for self-update)</li>
                 </ul>
-                <p><strong>Estimated cost:</strong> ~$7.30/month (private endpoint for blob storage). All other resources are free-tier or pay-per-use.</p>
+                <p><strong>Estimated cost:</strong> Free tier (500 minutes/month included). Typical usage is well within the free tier.</p>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>
                   <a href="https://devstack.vwgroup.com/confluence/x/oN1ltgE" target="_blank" rel="noreferrer">View full Terms of Use ↗</a>
@@ -126,7 +121,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
           {/* ── Step 2: Configuration ────────────────────────────────────── */}
           {step === 2 && (
             <>
-              <p className="wizard-intro">Configure the resources to deploy. Names must be unique within the subscription (storage account name is auto-generated).</p>
+              <p className="wizard-intro">Configure the resources to deploy. The Automation Account name must be globally unique.</p>
 
               <div className="wizard-fields">
                 <div className="wizard-field">
@@ -139,14 +134,14 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
                 </div>
 
                 <div className="wizard-field">
-                  <label className="label">Function App Name</label>
+                  <label className="label">Automation Account Name</label>
                   <input
                     className="wizard-input"
                     value={funcName}
                     onChange={e => setFuncName(e.target.value.trim())}
-                    placeholder="func-autoshutdown"
+                    placeholder="aa-autoshutdown"
                   />
-                  <span className="wizard-hint">Must be globally unique — becomes {funcName || 'func-autoshutdown'}.azurewebsites.net</span>
+                  <span className="wizard-hint">Must be globally unique within Azure</span>
                 </div>
 
                 <div className="wizard-field">
@@ -176,8 +171,8 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
           {step === 3 && (
             <>
               <p className="wizard-intro">
-                {running && 'Deploying Azure resources — this takes 10–15 minutes, please wait…'}
-                {done    && 'Installation complete. The Function App will be ready within a few minutes.'}
+                {running && 'Deploying Azure resources — this takes a few minutes, please wait…'}
+                {done    && 'Installation complete. The Automation Account runbooks will start on the next 15-minute interval.'}
                 {failed  && 'Installation encountered an error. Review the log below.'}
               </p>
               <div className="install-log" ref={logRef}>
