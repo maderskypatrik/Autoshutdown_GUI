@@ -1,17 +1,38 @@
-# profile.ps1 runs once per Function host cold start.
-# $env:MSI_SECRET is set by Azure when running inside a Function App — absent during local dev.
+# profile.ps1 runs once per PowerShell worker cold start, BEFORE the worker reports
+# its functions to the Functions host.
+#
+# IMPORTANT: Do NOT perform synchronous, network-bound work here (e.g.
+# Connect-AzAccount). On a VNet-integrated / locked-down Flex Consumption app the
+# managed-identity token round-trip takes several seconds, which delays the worker
+# becoming ready. If the host finishes its function-indexing pass before the worker
+# is ready, it logs "No job functions found" and never registers the timer
+# listeners — the functions show Enabled but never fire. So auth is done lazily on
+# first invocation instead (see Connect-AutoShutdownAz below), keeping cold start fast.
+
 if ($env:MSI_SECRET) {
     Disable-AzContextAutosave -Scope Process | Out-Null
-    try {
-        Connect-AzAccount -Identity -AccountId $env:USER_ASSIGNED_MI_CLIENT_ID -ErrorAction Stop | Out-Null
-        Write-Host "Authenticated via User-Assigned Managed Identity: $env:USER_ASSIGNED_MI_CLIENT_ID"
-    } catch {
-        Write-Warning "Connect-AzAccount failed (non-fatal on cold-start): $_"
-    }
 }
 
 # Capture root at profile load time so Invoke-VersionCheck can find version.txt
 $script:_FunctionAppRoot = $PSScriptRoot
+
+# Lazy, idempotent managed-identity sign-in. Called at the top of each function's
+# run.ps1. The first invocation on a warm instance authenticates; subsequent calls
+# detect the existing context and return immediately, so there is no per-run cost
+# beyond the first. This keeps the blocking Connect-AzAccount off the cold-start
+# critical path that gates function indexing.
+function Connect-AutoShutdownAz {
+    if (-not $env:MSI_SECRET) { return }   # not running in Azure (local dev)
+    try {
+        $ctx = Get-AzContext -ErrorAction SilentlyContinue
+        if ($ctx -and $ctx.Account) { return }   # already connected on this instance
+        Connect-AzAccount -Identity -AccountId $env:USER_ASSIGNED_MI_CLIENT_ID -ErrorAction Stop | Out-Null
+        Write-Host "Authenticated via User-Assigned Managed Identity: $env:USER_ASSIGNED_MI_CLIENT_ID"
+    } catch {
+        Write-Warning "Connect-AutoShutdownAz failed: $_"
+        throw
+    }
+}
 
 function Invoke-VersionCheck {
     <#

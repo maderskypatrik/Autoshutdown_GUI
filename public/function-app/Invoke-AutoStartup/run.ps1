@@ -25,6 +25,10 @@
 
 param($Timer)
 
+# Authenticate lazily on first invocation (kept out of profile.ps1 to avoid
+# blocking cold-start function indexing). Idempotent on warm instances.
+Connect-AutoShutdownAz
+
 if (Invoke-VersionCheck) { return }
 
 $WhatIf        = ($env:WHATIF -eq "true")
