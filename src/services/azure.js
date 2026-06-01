@@ -35,12 +35,11 @@ export async function getResourceGroups(token, subId) {
 }
 
 export async function getVMs(token, subId, rg = null) {
-  // Use Resource Graph for a single fast call that returns tags alongside VM metadata
+  // Phase 1: Resource Graph — tags and metadata in a single fast call
   let query = `Resources
 | where type =~ 'microsoft.compute/virtualmachines'`
   if (rg) query += `\n| where resourceGroup =~ '${rg}'`
-  query += `\n| project id, name, resourceGroup, tags, location,
-    powerState = tostring(properties.extended.instanceView.powerState.displayStatus)
+  query += `\n| project id, name, resourceGroup, tags, location
 | order by name asc`
 
   const all = []
@@ -58,7 +57,22 @@ export async function getVMs(token, subId, rg = null) {
     all.push(...(data.data ?? []))
     skipToken = data.$skipToken ?? null
   } while (skipToken)
-  return all
+
+  // Phase 2: ARM instanceView — real-time power state (Resource Graph lags by minutes)
+  const powerStates = {}
+  try {
+    let url = `${ARM}/subscriptions/${subId}/providers/Microsoft.Compute/virtualMachines?statusOnly=true&api-version=2024-03-01`
+    while (url) {
+      const resp = await armFetch(token, url)
+      for (const vm of resp.value ?? []) {
+        const s = (vm.properties?.instanceView?.statuses ?? []).find(s => s.code?.startsWith('PowerState/'))
+        if (s) powerStates[vm.id.toLowerCase()] = s.displayStatus
+      }
+      url = resp.nextLink ?? null
+    }
+  } catch { /* fallback: powerState will be empty → shown as Unknown */ }
+
+  return all.map(vm => ({ ...vm, powerState: powerStates[vm.id.toLowerCase()] ?? '' }))
 }
 
 // Updates VM tags via the VM PATCH API, which requires Microsoft.Compute/virtualMachines/write.
