@@ -1,5 +1,19 @@
 const ARM = 'https://management.azure.com'
 
+const POWER_STATE = {
+  'PowerState/running':      'Running',
+  'PowerState/deallocated':  'Deallocated',
+  'PowerState/stopped':      'Stopped',
+  'PowerState/starting':     'Starting',
+  'PowerState/stopping':     'Stopping',
+  'PowerState/deallocating': 'Deallocating',
+}
+function parsePowerState(statuses) {
+  const s = (statuses ?? []).find(s => s.code?.startsWith('PowerState/'))
+  if (!s) return ''
+  return POWER_STATE[s.code] ?? s.code.replace('PowerState/', '')
+}
+
 async function armFetch(token, url, options = {}) {
   const res = await fetch(url, {
     ...options,
@@ -65,8 +79,8 @@ export async function getVMs(token, subId, rg = null) {
     while (url) {
       const resp = await armFetch(token, url)
       for (const vm of resp.value ?? []) {
-        const s = (vm.properties?.instanceView?.statuses ?? []).find(s => s.code?.startsWith('PowerState/'))
-        if (s) powerStates[vm.id.toLowerCase()] = s.displayStatus
+        const state = parsePowerState(vm.properties?.instanceView?.statuses)
+        if (state) powerStates[vm.id.toLowerCase()] = state
       }
       url = resp.nextLink ?? null
     }
