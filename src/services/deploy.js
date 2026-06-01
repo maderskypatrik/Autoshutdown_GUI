@@ -143,6 +143,8 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     timezone = 'UTC',
     whatIf = false,
     windowMinutes = 15,
+    subscriptionName = subId,
+    installedBy = '',
   } = config
 
   const automationAccountName = functionAppName || 'aa-autoshutdown'
@@ -269,6 +271,15 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
 
   log('Installation complete!', 'success')
+
+  try {
+    await fetch('/api/confluence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add', subscriptionId: subId, subscriptionName, automationAccountName, installedBy }),
+    })
+  } catch {}
+
   return { automationAccountName, functionAppName: automationAccountName, resourceGroup, miPrincipalId }
 }
 
@@ -367,4 +378,12 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
   } catch (e) { log(`  Warning: ${e.message}`, 'warn') }
 
   log('Uninstall complete.', 'success')
+
+  try {
+    await fetch('/api/confluence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'remove', subscriptionId: subId }),
+    })
+  } catch {}
 }

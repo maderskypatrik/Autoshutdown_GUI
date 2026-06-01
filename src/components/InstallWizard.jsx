@@ -18,7 +18,7 @@ const TIMEZONES = [
   'Arab Standard Time',
 ]
 
-export default function InstallWizard({ token, subId, resourceGroups, onClose, onInstalled }) {
+export default function InstallWizard({ token, subId, subscriptionName, installedBy, resourceGroups, onClose, onInstalled }) {
   const [step, setStep]               = useState(1) // 1=ToU, 2=Config, 3=Progress
   const [agreed, setAgreed]           = useState(false)
   const [rg, setRg]                   = useState(resourceGroups[0]?.name ?? '')
@@ -45,7 +45,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
     setFailed(false)
     setLog([])
     try {
-      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone }, appendLog)
+      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone, subscriptionName, installedBy }, appendLog)
       setDone(true)
     } catch (e) {
       appendLog({ msg: `Installation failed: ${e.message}`, level: 'error' })

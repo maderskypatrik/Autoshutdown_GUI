@@ -331,6 +331,8 @@ export default function App() {
         <InstallWizard
           token={cachedToken}
           subId={selectedSubId}
+          subscriptionName={subscriptions.find(s => s.subscriptionId === selectedSubId)?.displayName ?? selectedSubId}
+          installedBy={accounts[0]?.username ?? ''}
           resourceGroups={resourceGroups}
           onClose={() => setShowInstallWizard(false)}
           onInstalled={() => { setShowInstallWizard(false); refreshInstallStatus() }}
