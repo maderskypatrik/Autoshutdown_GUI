@@ -134,6 +134,8 @@ Clicking **Install** opens a wizard that:
 
 The installation takes approximately 3–5 minutes. Once complete, the runbooks will act on any VMs that have the relevant tags, starting from the next 15-minute interval.
 
+If your administrator has configured the Confluence integration, the subscription is automatically added to the team's deployment registry page in Confluence when installation completes.
+
 ---
 
 ## Updating the Runbooks
@@ -152,6 +154,8 @@ Clicking **Uninstall** opens a confirmation dialog that:
 - Deletes the Automation Account (the system-assigned managed identity is deleted automatically with it)
 
 VM tags are not modified by the uninstaller — any enrolled VMs will retain their schedule tags but will no longer be acted on.
+
+If the Confluence integration is configured, the subscription is automatically removed from the team's deployment registry page when uninstallation completes.
 
 ---
 

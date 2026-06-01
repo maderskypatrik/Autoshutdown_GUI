@@ -191,7 +191,45 @@ GitHub Actions will automatically build and deploy. Check the **Actions** tab in
 
 ---
 
-## Step 6 — Test locally (optional but recommended)
+## Step 6 — Configure Confluence integration (optional)
+
+The app automatically records which subscriptions have the AutoShutdown solution installed in a Confluence page. This step is optional — the app works fully without it.
+
+### 6.1 Prepare the Confluence page
+
+Create (or identify) a Confluence page that will serve as the deployment registry. The page must contain an HTML table with a `<tbody>` element. The app will insert and remove rows in that table automatically.
+
+Recommended table columns: **Subscription Name**, **Subscription ID**, **Installed Date**, **Installed By**, **Automation Account**.
+
+### 6.2 Get a Confluence Personal Access Token
+
+1. In Confluence, go to **Profile** → **Settings** → **Personal Access Tokens**
+2. Create a new token with write access to the target page
+3. Copy the token value
+
+### 6.3 Find the page ID
+
+The page ID is the number in the Confluence URL: `…/confluence/pages/**123456789**/…`
+
+### 6.4 Add the settings to the Static Web App
+
+1. Go to the **Azure Portal** → open your Static Web App
+2. In the left menu, click **Configuration** → **Application settings**
+3. Add three settings:
+
+| Name | Value |
+|---|---|
+| `CONFLUENCE_BASE_URL` | Base URL of your Confluence instance, e.g. `https://yourcompany.atlassian.net/wiki` |
+| `CONFLUENCE_PAGE_ID` | The numeric page ID from step 6.3 |
+| `CONFLUENCE_TOKEN` | The Personal Access Token from step 6.2 |
+
+4. Click **Save**
+
+> These settings are only accessible server-side. They are never sent to the browser.
+
+---
+
+## Step 7 — Test locally (optional but recommended)
 
 Before relying on the deployed version, test locally:
 
@@ -211,7 +249,7 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 
 ---
 
-## Step 7 — Verify deployment
+## Step 8 — Verify deployment
 
 1. Go to your GitHub repo → **Actions** tab
 2. You should see a workflow run triggered by your last push

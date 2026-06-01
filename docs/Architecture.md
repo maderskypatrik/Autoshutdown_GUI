@@ -1,12 +1,12 @@
 # VM Auto-shutdown Manager — Architecture
 
-**PowerCloud Team · Last updated: 2026-06-01**
+**PowerCloud Team · Last updated: 2026-06-02**
 
 ---
 
 ## System Overview
 
-The solution has two independent layers that share data only through Azure VM tags.
+The solution has two independent layers that share data only through Azure VM tags, plus a lightweight server-side API function for Confluence tracking.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -14,17 +14,17 @@ The solution has two independent layers that share data only through Azure VM ta
 │  User authenticates via Entra ID → gets ARM access token         │
 │  Calls Azure ARM APIs directly with the user's own token         │
 │  Reads / writes VM tags                                          │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │ ARM API (user's token)
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Azure Resource Manager                                          │
-│  Resource Graph (read VMs + tags)                                │
-│  ARM instanceView statusOnly (real-time power state)             │
-│  VM PATCH API (write tags — requires virtualMachines/write)      │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │ VM tags (shared state)
-                       ▼
+└──────────┬───────────────────────────────────┬───────────────────┘
+           │ ARM API (user's token)             │ POST /api/confluence
+           ▼                                   ▼
+┌─────────────────────────┐   ┌────────────────────────────────────┐
+│  Azure Resource Manager │   │  SWA API Function (server-side)    │
+│  Resource Graph          │   │  Reads Confluence credentials from │
+│  ARM statusOnly          │   │  SWA app settings (never in        │
+│  VM PATCH API            │   │  browser). Adds/removes rows in    │
+└────────────┬────────────┘   │  the Deployed Subscriptions page.  │
+             │ VM tags         └────────────────────────────────────┘
+             ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Azure Automation Account  (PowerShell 7.2 runbooks)             │
 │  Runs every 15 minutes — reads tags via Resource Graph REST API  │
@@ -33,7 +33,7 @@ The solution has two independent layers that share data only through Azure VM ta
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-There is no backend API, no database, no storage account, and no shared secrets. The browser calls Azure directly. The Automation Account runs on its own schedule. Both read VM tags from Azure; neither knows about the other.
+There is no database, no storage account, and no shared secrets in the browser. The Confluence token lives only in SWA application settings and is only ever accessed server-side.
 
 ---
 
@@ -41,12 +41,11 @@ There is no backend API, no database, no storage account, and no shared secrets.
 
 ### Hosting
 
-React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions. The SWA also serves the runbook PowerShell scripts as static files:
+React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions.
 
-- `/runbooks/AutoShutdown.ps1`
-- `/runbooks/AutoStartup.ps1`
+The runbook PowerShell scripts (`public/runbooks/AutoShutdown.ps1`, `public/runbooks/AutoStartup.ps1`) are bundled directly into the JavaScript bundle at build time via Vite `?raw` imports in `deploy.js`. The installer uploads their content to the Automation Account via the ARM draft/content API (`PUT .../runbooks/{name}/draft/content`) — no public URL fetch is needed.
 
-These files are fetched by the installer at deploy time and published into the Automation Account. No build step is needed — they are plain static files under `public/runbooks/`.
+The SWA also hosts the **API function** (`api/confluence/`) which handles Confluence tracking server-side.
 
 ### Authentication
 
@@ -71,6 +70,17 @@ src/
 └── services/
     ├── azure.js               ARM read/write calls (subscriptions, RGs, VMs, tags, power state refresh)
     └── deploy.js              Install, update, uninstall, and detectInstallation logic
+
+api/
+├── confluence/
+│   ├── index.js               SWA API function — receives action (add/remove), updates Confluence page
+│   └── function.json          HTTP trigger, POST, anonymous authLevel
+└── package.json               Node 18 engine specification
+
+public/
+└── runbooks/
+    ├── AutoShutdown.ps1       PowerShell 7.2 runbook — bundled via Vite ?raw at build time
+    └── AutoStartup.ps1        PowerShell 7.2 runbook — bundled via Vite ?raw at build time
 ```
 
 ### State management (`App.jsx`)
@@ -119,6 +129,31 @@ Handles installation lifecycle. Uses the user's token — requires Owner on the 
 | `uninstallAutoShutdown` | Removes RBAC role assignments, then deletes the Automation Account (system-assigned MI is deleted automatically) |
 
 `RUNBOOK_VERSION` is exported from `deploy.js` and compared against the `autoshutdown-version` tag on the installed account. When they differ, `SubscriptionStatus` shows an amber **"Update available"** button.
+
+### `api/confluence/index.js` — SWA API Function
+
+Server-side Azure Function (Node.js 18) that keeps a Confluence page up to date with the list of subscriptions where the solution is installed. Called automatically on install and uninstall — never from the browser with credentials.
+
+**Trigger:** `POST /api/confluence`
+
+**Body:**
+```json
+{ "action": "add" | "remove", "subscriptionId": "...", "subscriptionName": "...", "automationAccountName": "...", "installedBy": "..." }
+```
+
+**Behaviour:**
+- `add`: removes any existing row for the subscriptionId (idempotent dedup), then appends a new row with subscription name, ID, install date, installed-by, and Automation Account name
+- `remove`: removes the row matching the subscriptionId
+
+**Credentials** are read from SWA Application Settings (environment variables), never from the request body:
+
+| Setting | Purpose |
+|---|---|
+| `CONFLUENCE_BASE_URL` | Base URL of the Confluence instance (e.g. `https://yourcompany.atlassian.net/wiki`) |
+| `CONFLUENCE_PAGE_ID` | Numeric ID of the target Confluence page |
+| `CONFLUENCE_TOKEN` | Personal Access Token (PAT) with write access to the page |
+
+Confluence calls fail silently — a Confluence outage or misconfiguration does not block install or uninstall.
 
 ---
 
@@ -251,7 +286,21 @@ Schedule fires
   → Print summary to job output
 ```
 
-### 4. Runbook update
+### 4. Confluence tracking (install / uninstall)
+
+```
+installAutoShutdown or uninstallAutoShutdown completes
+  → deploy.js POSTs to /api/confluence (fire-and-forget, catch ignored)
+     Body: { action: 'add'|'remove', subscriptionId, subscriptionName, automationAccountName, installedBy }
+  → SWA routes request to api/confluence/index.js (server-side, Node 18)
+  → Function reads CONFLUENCE_BASE_URL, CONFLUENCE_PAGE_ID, CONFLUENCE_TOKEN from SWA app settings
+  → GET Confluence page body (REST API v2)
+  → 'add': removeRow(body, subscriptionId) then appendRow(body, row data)
+     'remove': removeRow(body, subscriptionId)
+  → PUT updated page body back to Confluence with incremented version number
+```
+
+### 5. Runbook update
 
 ```
 Admin pushes runbook code change to GitHub → bumps RUNBOOK_VERSION in deploy.js
