@@ -171,7 +171,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
             <>
               <p className="wizard-intro">
                 {running && 'Deploying Azure resources — this takes a few minutes, please wait…'}
-                {done    && 'Installation complete. The Automation Account runbooks will start on the next 15-minute interval.'}
+                {done    && 'Installation complete. The Automation Account runbooks will start on the next 5-minute interval.'}
                 {failed  && 'Installation encountered an error. Review the log below.'}
               </p>
               <div className="install-log" ref={logRef}>
