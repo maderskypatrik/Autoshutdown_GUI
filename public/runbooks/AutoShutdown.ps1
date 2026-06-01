@@ -17,9 +17,10 @@
       - Config comes from runbook parameters instead of app settings.
 
     Tag format:
-      shutdown = 18:30           VM is deallocated at 18:30 in the TimeZoneId window
-      autoshutdown-enrolled      required marker tag (any value)
-      donotshutdown              optional opt-out (any value, case-insensitive)
+      shutdown = 18:30                   VM is deallocated at 18:30 in the TimeZoneId window
+      autoshutdown-enrolled              required marker tag (any value)
+      donotshutdown                      optional opt-out (any value, case-insensitive)
+      autoshutdown-weekdays-only         optional — skip shutdown/startup on Saturday and Sunday
 
 .PARAMETER WhatIf
     When $true, logs intended actions without executing them.
@@ -96,9 +97,10 @@ Resources
 | where isnotnull(tags['autoshutdown-enrolled'])
 | project
     id, name, resourceGroup, subscriptionId, type,
-    shutdownTime  = tostring(tags.shutdown),
-    doNotShutdown = isnotnull(tags.donotshutdown),
-    powerState    = iff(
+    shutdownTime   = tostring(tags.shutdown),
+    doNotShutdown  = isnotnull(tags.donotshutdown),
+    weekdaysOnly   = isnotnull(tags['autoshutdown-weekdays-only']),
+    powerState     = iff(
         type =~ 'microsoft.compute/virtualmachines',
         tostring(properties.extended.instanceView.powerState.displayStatus),
         tostring(properties.instanceView.powerState)
@@ -128,6 +130,10 @@ Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'shutdown' tag in
 $toShutdown = $allTaggedVMs | Where-Object {
     if ($_.doNotShutdown) {
         Write-Log "  SKIP $($_.name) — tagged 'donotshutdown'."
+        return $false
+    }
+    if ($_.weekdaysOnly -and $Now.DayOfWeek -in @([DayOfWeek]::Saturday, [DayOfWeek]::Sunday)) {
+        Write-Log "  SKIP $($_.name) — weekdays-only, today is $($Now.DayOfWeek)."
         return $false
     }
     if (-not (Test-InWindow -TagValue $_.shutdownTime -Now $Now -WindowMinutes $WindowMinutes)) {

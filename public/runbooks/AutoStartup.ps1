@@ -12,9 +12,10 @@
     start calls are unchanged.
 
     Tag format:
-      startup = 07:00            VM is started at 07:00 in the TimeZoneId window
-      autoshutdown-enrolled      required marker tag (any value)
-      donotstart                 optional opt-out (any value, case-insensitive)
+      startup = 07:00                    VM is started at 07:00 in the TimeZoneId window
+      autoshutdown-enrolled              required marker tag (any value)
+      donotstart                         optional opt-out (any value, case-insensitive)
+      autoshutdown-weekdays-only         optional — skip shutdown/startup on Saturday and Sunday
 
 .PARAMETER WhatIf
     When $true, logs intended actions without executing them.
@@ -89,9 +90,10 @@ Resources
 | where isnotnull(tags['autoshutdown-enrolled'])
 | project
     id, name, resourceGroup, subscriptionId, type,
-    startupTime = tostring(tags.startup),
-    doNotStart  = isnotnull(tags.donotstart),
-    powerState  = iff(
+    startupTime  = tostring(tags.startup),
+    doNotStart   = isnotnull(tags.donotstart),
+    weekdaysOnly = isnotnull(tags['autoshutdown-weekdays-only']),
+    powerState   = iff(
         type =~ 'microsoft.compute/virtualmachines',
         tostring(properties.extended.instanceView.powerState.displayStatus),
         tostring(properties.instanceView.powerState)
@@ -121,6 +123,10 @@ Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'startup' tag in 
 $toStart = $allTaggedVMs | Where-Object {
     if ($_.doNotStart) {
         Write-Log "  SKIP $($_.name) — tagged 'donotstart'."
+        return $false
+    }
+    if ($_.weekdaysOnly -and $Now.DayOfWeek -in @([DayOfWeek]::Saturday, [DayOfWeek]::Sunday)) {
+        Write-Log "  SKIP $($_.name) — weekdays-only, today is $($Now.DayOfWeek)."
         return $false
     }
     if (-not (Test-InWindow -TagValue $_.startupTime -Now $Now -WindowMinutes $WindowMinutes)) {

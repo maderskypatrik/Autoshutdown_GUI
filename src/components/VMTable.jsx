@@ -83,6 +83,17 @@ function VMRow({ vm, edit, onEdit, dirty }) {
           <span>Exclude</span>
         </label>
       </td>
+
+      <td className="td-toggle">
+        <label className="toggle" title="Tag VM with autoshutdown-weekdays-only — skip shutdown and startup on Saturday and Sunday">
+          <input
+            type="checkbox"
+            checked={edit.weekdaysOnly}
+            onChange={e => onEdit(vm.id, 'weekdaysOnly', e.target.checked)}
+          />
+          <span>Mon–Fri</span>
+        </label>
+      </td>
     </tr>
   )
 }
@@ -125,6 +136,7 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
               <th rowSpan={2}>Status</th>
               <th colSpan={2} className="th-group">Shutdown</th>
               <th colSpan={2} className="th-group">Startup</th>
+              <th rowSpan={2}>Weekdays only</th>
             </tr>
             <tr className="th-sub">
               <th>Time</th>
@@ -136,14 +148,14 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="td-empty">No VMs match the filter.</td>
+                <td colSpan={9} className="td-empty">No VMs match the filter.</td>
               </tr>
             ) : (
               filtered.map(vm => (
                 <VMRow
                   key={vm.id}
                   vm={vm}
-                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false }}
+                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false, weekdaysOnly: false }}
                   onEdit={onEdit}
                   dirty={isDirty(vm)}
                 />

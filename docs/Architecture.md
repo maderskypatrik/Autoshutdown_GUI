@@ -170,6 +170,7 @@ All scheduling data is stored as Azure tags on the VM. No other data store.
 | `autoshutdown-enrolled` | any (e.g. `true`) | Marks VM as managed — runbooks ignore VMs without this tag |
 | `donotshutdown` | any | Prevents automatic shutdown regardless of `shutdown` tag |
 | `donotstart` | any | Prevents automatic startup regardless of `startup` tag |
+| `autoshutdown-weekdays-only` | any (e.g. `true`) | Skips shutdown and startup on Saturday and Sunday |
 
 **Implicit enrollment:** The UI sets `autoshutdown-enrolled` automatically when a schedule is saved (if either `shutdown` or `startup` is set) and removes it when both are cleared.
 

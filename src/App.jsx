@@ -34,10 +34,11 @@ function isValidTime(v) {
 
 function vmToEdit(vm) {
   return {
-    shutdown:   getTagCI(vm.tags, 'shutdown')   ?? '',
-    startup:    getTagCI(vm.tags, 'startup')    ?? '',
-    noShutdown: hasTagCI(vm.tags, 'donotshutdown'),
-    noStart:    hasTagCI(vm.tags, 'donotstart'),
+    shutdown:     getTagCI(vm.tags, 'shutdown')   ?? '',
+    startup:      getTagCI(vm.tags, 'startup')    ?? '',
+    noShutdown:   hasTagCI(vm.tags, 'donotshutdown'),
+    noStart:      hasTagCI(vm.tags, 'donotstart'),
+    weekdaysOnly: hasTagCI(vm.tags, 'autoshutdown-weekdays-only'),
   }
 }
 
@@ -173,7 +174,8 @@ export default function App() {
     if (!e) return false
     const o = vmToEdit(vm)
     return e.shutdown !== o.shutdown || e.startup !== o.startup ||
-           e.noShutdown !== o.noShutdown || e.noStart !== o.noStart
+           e.noShutdown !== o.noShutdown || e.noStart !== o.noStart ||
+           e.weekdaysOnly !== o.weekdaysOnly
   }
 
   const dirtyVMs = vms.filter(isDirty)
@@ -195,15 +197,16 @@ export default function App() {
       const saveVM = async (vm) => {
         const e = edits[vm.id]
         let newTags = { ...(vm.tags ?? {}) }
-        for (const key of ['shutdown', 'startup', 'donotshutdown', 'donotstart', 'autoshutdown-enrolled']) {
+        for (const key of ['shutdown', 'startup', 'donotshutdown', 'donotstart', 'autoshutdown-enrolled', 'autoshutdown-weekdays-only']) {
           for (const k of Object.keys(newTags)) {
             if (k.toLowerCase() === key) delete newTags[k]
           }
         }
-        if (e.shutdown)   newTags.shutdown      = e.shutdown
-        if (e.startup)    newTags.startup       = e.startup
-        if (e.noShutdown) newTags.donotshutdown = 'true'
-        if (e.noStart)    newTags.donotstart    = 'true'
+        if (e.shutdown)     newTags.shutdown      = e.shutdown
+        if (e.startup)      newTags.startup       = e.startup
+        if (e.noShutdown)   newTags.donotshutdown = 'true'
+        if (e.noStart)      newTags.donotstart    = 'true'
+        if (e.weekdaysOnly) newTags['autoshutdown-weekdays-only'] = 'true'
         if (e.shutdown || e.startup) newTags['autoshutdown-enrolled'] = 'true'
         try {
           await patchVMTags(token, vm.id, newTags)
@@ -228,10 +231,11 @@ export default function App() {
           const next = { ...prev }
           for (const { vmId, newTags } of saved) {
             next[vmId] = {
-              shutdown:   getTagCI(newTags, 'shutdown') ?? '',
-              startup:    getTagCI(newTags, 'startup')  ?? '',
-              noShutdown: hasTagCI(newTags, 'donotshutdown'),
-              noStart:    hasTagCI(newTags, 'donotstart'),
+              shutdown:     getTagCI(newTags, 'shutdown') ?? '',
+              startup:      getTagCI(newTags, 'startup')  ?? '',
+              noShutdown:   hasTagCI(newTags, 'donotshutdown'),
+              noStart:      hasTagCI(newTags, 'donotstart'),
+              weekdaysOnly: hasTagCI(newTags, 'autoshutdown-weekdays-only'),
             }
           }
           return next
