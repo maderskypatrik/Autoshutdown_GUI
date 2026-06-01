@@ -141,7 +141,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     functionAppName,                 // reused as the Automation account name
     timezone = 'UTC',
     whatIf = false,
-    windowMinutes = 15,
+    windowMinutes = 5,
   } = config
 
   const automationAccountName = functionAppName || 'aa-autoshutdown'
