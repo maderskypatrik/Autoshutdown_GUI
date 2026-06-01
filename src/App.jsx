@@ -3,7 +3,7 @@ import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
 import { getSubscriptions, getResourceGroups, getVMs, patchVMTags, refreshVMPowerStates } from './services/azure'
-import { detectInstallation } from './services/deploy'
+import { detectInstallation, RUNBOOK_VERSION } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
 import Controls from './components/Controls'
@@ -11,6 +11,7 @@ import VMTable from './components/VMTable'
 import SubscriptionStatus from './components/SubscriptionStatus'
 import InstallWizard from './components/InstallWizard'
 import UninstallDialog from './components/UninstallDialog'
+import UpdateDialog from './components/UpdateDialog'
 
 function getTagCI(tags, key) {
   if (!tags) return undefined
@@ -60,6 +61,7 @@ export default function App() {
   const [installStatus,    setInstallStatus]    = useState(null)
   const [showInstallWizard, setShowInstallWizard] = useState(false)
   const [showUninstall,     setShowUninstall]     = useState(false)
+  const [showUpdate,        setShowUpdate]        = useState(false)
   const [cachedToken,       setCachedToken]       = useState(null)
 
   const getToken = useCallback(async () => {
@@ -267,8 +269,10 @@ export default function App() {
 
         <SubscriptionStatus
           status={installStatus}
+          currentVersion={RUNBOOK_VERSION}
           onInstall={() => setShowInstallWizard(true)}
           onUninstall={() => setShowUninstall(true)}
+          onUpdate={() => setShowUpdate(true)}
         />
 
         {error && <div className="banner banner-error">{error}</div>}
@@ -340,6 +344,16 @@ export default function App() {
           installation={installStatus}
           onClose={() => setShowUninstall(false)}
           onUninstalled={() => { setShowUninstall(false); setInstallStatus({ installed: false }); setVms([]); setEdits({}) }}
+        />
+      )}
+
+      {showUpdate && installStatus?.installed && (
+        <UpdateDialog
+          token={cachedToken}
+          subId={selectedSubId}
+          installation={installStatus}
+          onClose={() => setShowUpdate(false)}
+          onUpdated={() => { setShowUpdate(false); setInstallStatus(prev => ({ ...prev, version: RUNBOOK_VERSION })) }}
         />
       )}
     </div>

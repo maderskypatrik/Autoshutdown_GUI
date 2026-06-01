@@ -1,4 +1,4 @@
-export default function SubscriptionStatus({ status, onInstall, onUninstall }) {
+export default function SubscriptionStatus({ status, currentVersion, onInstall, onUninstall, onUpdate }) {
   if (!status) return null
 
   if (status === 'checking') {
@@ -20,6 +20,8 @@ export default function SubscriptionStatus({ status, onInstall, onUninstall }) {
     )
   }
 
+  const updateAvailable = status.version !== currentVersion
+
   return (
     <div className="sub-status sub-status-installed">
       <span className="sub-status-icon">✓</span>
@@ -29,7 +31,12 @@ export default function SubscriptionStatus({ status, onInstall, onUninstall }) {
         <span className="sub-status-sep">·</span>
         <span className="sub-status-detail">{status.resourceGroup}</span>
       </span>
-      <button className="btn btn-uninstall" onClick={onUninstall}>Uninstall</button>
+      <div className="sub-status-actions">
+        {updateAvailable && (
+          <button className="btn btn-update" onClick={onUpdate}>Update available</button>
+        )}
+        <button className="btn btn-uninstall" onClick={onUninstall}>Uninstall</button>
+      </div>
     </div>
   )
 }

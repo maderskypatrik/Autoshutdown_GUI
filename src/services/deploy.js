@@ -20,9 +20,12 @@
 
 const ARM = 'https://management.azure.com'
 
-const MANAGED_TAG_KEY  = 'autoshutdown-managed'
-const MANAGED_TAG_VAL  = 'v4-automation'
-const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
+const MANAGED_TAG_KEY     = 'autoshutdown-managed'
+const MANAGED_TAG_VAL     = 'v4-automation'
+const MI_PRINCIPAL_TAG    = 'autoshutdown-mi-principal-id'
+const MANAGED_TAG_VERSION = 'autoshutdown-version'
+
+export const RUNBOOK_VERSION = '20260601'
 
 const ROLE_VM_CONTRIBUTOR         = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
 const ROLE_READER                 = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
@@ -128,6 +131,7 @@ export async function detectInstallation(token, subId) {
     resourceGroup:         aa.resourceGroup,
     location:              aa.location,
     miPrincipalId:         aa.identity?.principalId ?? aa.tags?.[MI_PRINCIPAL_TAG] ?? null,
+    version:               aa.tags?.[MANAGED_TAG_VERSION] ?? null,
   }
 }
 
@@ -145,7 +149,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   } = config
 
   const automationAccountName = functionAppName || 'aa-autoshutdown'
-  const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
+  const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL, [MANAGED_TAG_VERSION]: RUNBOOK_VERSION }
 
   // Runbook content is served from this app's own origin.
   const runbookBaseUrl =
@@ -282,6 +286,75 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   log('Installation complete!', 'success')
   return { automationAccountName, functionAppName: automationAccountName, resourceGroup, miPrincipalId }
+}
+
+// ── updateRunbooks ─────────────────────────────────────────────────────────────
+// Re-publishes runbooks from the current SWA origin and stamps the new version
+// tag on the Automation Account. Does not touch RBAC, schedules, or the account
+// itself — safe to run against a live installation.
+
+export async function updateRunbooks(token, subId, installation, onLog) {
+  const log = (msg, level = 'info') => onLog({ msg, level })
+  const { resourceGroup, automationAccountName, location } = installation
+
+  const runbookBaseUrl =
+    (typeof window !== 'undefined' ? window.location.origin : '') + '/runbooks'
+
+  const runbooks = [
+    { name: 'AutoShutdown', file: 'AutoShutdown.ps1' },
+    { name: 'AutoStartup',  file: 'AutoStartup.ps1'  },
+  ]
+
+  for (const rb of runbooks) {
+    const contentUrl = `${runbookBaseUrl.replace(/\/$/, '')}/${rb.file}`
+    log(`Fetching runbook content: ${rb.file}...`)
+    const resp = await fetch(contentUrl)
+    if (!resp.ok) throw new Error(`Could not fetch runbook content ${contentUrl}: HTTP ${resp.status}`)
+    const content = await resp.text()
+    const hash = (await sha256Hex(content)).toUpperCase()
+
+    log(`Updating runbook ${rb.name}...`)
+    const rbUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}?api-version=${AA_API}`
+    await armFetch(token, rbUrl, {
+      method: 'PUT',
+      body: JSON.stringify({
+        location,
+        tags: { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL, [MANAGED_TAG_VERSION]: RUNBOOK_VERSION },
+        properties: {
+          runbookType: 'PowerShell72',
+          logVerbose: false,
+          logProgress: false,
+          publishContentLink: { uri: contentUrl, contentHash: { algorithm: 'SHA256', value: hash } },
+        },
+      }),
+    })
+    log(`Publishing runbook ${rb.name}...`)
+    await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}/publish?api-version=${AA_API}`,
+      { method: 'POST' }
+    )
+    await poll(async () => {
+      try {
+        const r = await armFetch(token, rbUrl)
+        return r?.properties?.state === 'Published' ? r : null
+      } catch { return null }
+    }, { intervalMs: 5000, timeoutMs: 180000, label: `runbook ${rb.name} publish` })
+    log(`Runbook ${rb.name} updated.`, 'success')
+  }
+
+  log('Stamping new version on Automation Account...')
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}?api-version=${AA_API}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        tags: { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL, [MANAGED_TAG_VERSION]: RUNBOOK_VERSION },
+      }),
+    }
+  )
+  log('Update complete!', 'success')
 }
 
 // ── uninstallAutoShutdown ──────────────────────────────────────────────────────

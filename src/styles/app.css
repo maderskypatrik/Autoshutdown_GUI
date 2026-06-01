@@ -357,8 +357,11 @@ body {
 
 .btn-install   { margin-left: auto; background: #212124; color: var(--white); border: 1px solid #111112; border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .btn-install:hover   { background: #373739; }
-.btn-uninstall { margin-left: auto; background: var(--white); color: var(--red);   border: 1px solid var(--red);       border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-uninstall { background: var(--white); color: var(--red); border: 1px solid var(--red); border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .btn-uninstall:hover { background: #fde7e9; }
+.btn-update    { background: #fff3cd; color: #856404; border: 1px solid #ffc107; border-radius: var(--radius); padding: 5px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn-update:hover    { background: #ffe69c; }
+.sub-status-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .btn-danger    { background: var(--red); color: var(--white); border: 1px solid #a32218; border-radius: var(--radius); padding: 7px 14px; font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .btn-danger:hover { background: #a32218; }
 
