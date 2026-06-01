@@ -239,7 +239,10 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
 
   // ── Step 4: Schedules + job-schedule links ─────────────────────────────────
-  const startTime = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  // Snap to the next windowMinutes clock boundary (e.g. :00/:15/:30/:45 for 15 min).
+  // Add 1 min buffer so the schedule is always safely in the future when registered.
+  const interval  = windowMinutes * 60 * 1000
+  const startTime = new Date(Math.ceil((Date.now() + 60_000) / interval) * interval).toISOString()
   for (const rb of runbooks) {
     const schedName = `sched-${rb.name}`
     log(`Creating schedule ${schedName} (every ${windowMinutes} min)...`)
