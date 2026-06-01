@@ -198,10 +198,11 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   // and are imported best-effort. Az.ResourceGraph is NOT preinstalled and is
   // required — Search-AzGraph will fail at runtime without it. We block until
   // it is confirmed Succeeded before publishing runbooks.
+  // Az.Accounts and Az.Compute are built into the PS 7.2 sandbox runtime —
+  // re-importing them via powerShell72Modules causes assembly load context
+  // conflicts. Only Az.ResourceGraph needs explicit import.
   const modules = [
-    { name: 'Az.Accounts',      uri: 'https://www.powershellgallery.com/api/v2/package/Az.Accounts',      required: false },
-    { name: 'Az.Compute',       uri: 'https://www.powershellgallery.com/api/v2/package/Az.Compute',       required: false },
-    { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph', required: true  },
+    { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph', required: true },
   ]
   for (const m of modules) {
     log(`Importing module ${m.name}${m.required ? '' : ' (best-effort)'}...`)
