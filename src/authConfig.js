@@ -3,8 +3,8 @@
 
 export const msalConfig = {
   auth: {
-    clientId:    '605c559a-cae2-4109-9609-26bd9e14b052',   // App Registration → Overview → Application (client) ID
-    authority:   'https://login.microsoftonline.com/0e7cee5a-a076-4664-b59d-a617348d5541', // Directory (tenant) ID — or use "common"
+    clientId:    '92434e29-142c-45ef-9ac5-18674851afc9',   // App Registration → Overview → Application (client) ID
+    authority:   'https://login.microsoftonline.com/a8cf543a-438a-4e26-96a1-a99cfa3c6b07', // Directory (tenant) ID — or use "common"
     redirectUri: window.location.origin,
     postLogoutRedirectUri: window.location.origin,
   },
