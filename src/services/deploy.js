@@ -18,6 +18,9 @@
 // scale-to-zero cold-start trigger race. See SECURITY-CROSSWALK.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import autoShutdownContent from '../../public/runbooks/AutoShutdown.ps1?raw'
+import autoStartupContent  from '../../public/runbooks/AutoStartup.ps1?raw'
+
 const ARM = 'https://management.azure.com'
 
 const MANAGED_TAG_KEY     = 'autoshutdown-managed'
@@ -94,12 +97,6 @@ async function assignRole(token, subId, scope, principalId, roleDefId) {
   }
 }
 
-async function sha256Hex(text) {
-  const data = new TextEncoder().encode(text)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
 // ── detectInstallation ─────────────────────────────────────────────────────────
 // Drives the "installed" banner and feeds uninstall. Now looks for the Automation
 // account (tagged managed) rather than a Function App. Returns the same field
@@ -151,10 +148,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   const automationAccountName = functionAppName || 'aa-autoshutdown'
   const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL, [MANAGED_TAG_VERSION]: RUNBOOK_VERSION }
 
-  // Runbook content is served from this app's own origin.
-  const runbookBaseUrl =
-    (typeof window !== 'undefined' ? window.location.origin : '') + '/runbooks'
-
   // Resolve the RG location so the account lands in the right region.
   log('Reading resource group location...')
   const rg = await armFetch(
@@ -197,21 +190,12 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_AUTOMATION_CONTRIBUTOR)
   log('Automation Contributor role assigned.', 'success')
 
-  // ── Step 3: Create + publish runbooks (content fetched from SWA origin) ────
-  // No module imports needed — runbooks use Invoke-RestMethod for Resource Graph
-  // queries; Az.Accounts and Az.Compute are built into the PS 7.2 runtime.
+  // ── Step 3: Create + publish runbooks (content bundled at build time) ────────
   const runbooks = [
-    { name: 'AutoShutdown', file: 'AutoShutdown.ps1' },
-    { name: 'AutoStartup',  file: 'AutoStartup.ps1'  },
+    { name: 'AutoShutdown', content: autoShutdownContent },
+    { name: 'AutoStartup',  content: autoStartupContent  },
   ]
   for (const rb of runbooks) {
-    const contentUrl = `${runbookBaseUrl.replace(/\/$/, '')}/${rb.file}`
-    log(`Fetching runbook content: ${rb.file}...`)
-    const resp = await fetch(contentUrl)
-    if (!resp.ok) throw new Error(`Could not fetch runbook content ${contentUrl}: HTTP ${resp.status}`)
-    const content = await resp.text()
-    const hash = (await sha256Hex(content)).toUpperCase()
-
     log(`Creating runbook ${rb.name}...`)
     const rbUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}?api-version=${AA_API}`
     await armFetch(token, rbUrl, {
@@ -219,14 +203,14 @@ export async function installAutoShutdown(token, subId, config, onLog) {
       body: JSON.stringify({
         location,
         tags: managedTags,
-        properties: {
-          runbookType: 'PowerShell72',
-          logVerbose: false,
-          logProgress: false,
-          publishContentLink: { uri: contentUrl, contentHash: { algorithm: 'SHA256', value: hash } },
-        },
+        properties: { runbookType: 'PowerShell72', logVerbose: false, logProgress: false },
       }),
     })
+    log(`Uploading runbook content: ${rb.name}...`)
+    await fetch(
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}/draft/content?api-version=${AA_API}`,
+      { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/powershell' }, body: rb.content }
+    )
     log(`Publishing runbook ${rb.name}...`)
     await armFetch(
       token,
@@ -297,22 +281,12 @@ export async function updateRunbooks(token, subId, installation, onLog) {
   const log = (msg, level = 'info') => onLog({ msg, level })
   const { resourceGroup, automationAccountName, location } = installation
 
-  const runbookBaseUrl =
-    (typeof window !== 'undefined' ? window.location.origin : '') + '/runbooks'
-
   const runbooks = [
-    { name: 'AutoShutdown', file: 'AutoShutdown.ps1' },
-    { name: 'AutoStartup',  file: 'AutoStartup.ps1'  },
+    { name: 'AutoShutdown', content: autoShutdownContent },
+    { name: 'AutoStartup',  content: autoStartupContent  },
   ]
 
   for (const rb of runbooks) {
-    const contentUrl = `${runbookBaseUrl.replace(/\/$/, '')}/${rb.file}`
-    log(`Fetching runbook content: ${rb.file}...`)
-    const resp = await fetch(contentUrl)
-    if (!resp.ok) throw new Error(`Could not fetch runbook content ${contentUrl}: HTTP ${resp.status}`)
-    const content = await resp.text()
-    const hash = (await sha256Hex(content)).toUpperCase()
-
     log(`Updating runbook ${rb.name}...`)
     const rbUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}?api-version=${AA_API}`
     await armFetch(token, rbUrl, {
@@ -320,14 +294,14 @@ export async function updateRunbooks(token, subId, installation, onLog) {
       body: JSON.stringify({
         location,
         tags: { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL, [MANAGED_TAG_VERSION]: RUNBOOK_VERSION },
-        properties: {
-          runbookType: 'PowerShell72',
-          logVerbose: false,
-          logProgress: false,
-          publishContentLink: { uri: contentUrl, contentHash: { algorithm: 'SHA256', value: hash } },
-        },
+        properties: { runbookType: 'PowerShell72', logVerbose: false, logProgress: false },
       }),
     })
+    log(`Uploading runbook content: ${rb.name}...`)
+    await fetch(
+      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/runbooks/${rb.name}/draft/content?api-version=${AA_API}`,
+      { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/powershell' }, body: rb.content }
+    )
     log(`Publishing runbook ${rb.name}...`)
     await armFetch(
       token,
