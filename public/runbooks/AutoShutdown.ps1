@@ -140,70 +140,67 @@ Write-Log "$(@($toShutdown).Count) VM(s) are in the current shutdown window."
 
 #endregion
 
-#region ── Act ───────────────────────────────────────────────────────────────────
+#region ── Act (parallel REST calls — no sequential blocking) ────────────────────
 
-$stats = @{ ShutDown = 0; SkippedAlreadyOff = 0; Errors = 0 }
+$parallelResults = @($toShutdown | ForEach-Object -Parallel {
+    $vm      = $_
+    $token   = $using:armToken
+    $whatIf  = $using:WhatIf
+    $name    = $vm.name
+    $rg      = $vm.resourceGroup
+    $sub     = $vm.subscriptionId
+    $isLocal = $vm.type -ilike '*azurestackhci*'
+    $type    = if ($isLocal) { 'AzureLocal' } else { 'AzureVM' }
+    $ts      = { "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][INFO]" }
 
-$grouped = @($toShutdown | Group-Object subscriptionId)
-foreach ($group in $grouped) {
+    Write-Output "$(& $ts)   $name (RG: $rg) shutdown=$($vm.shutdownTime) type=$type"
 
-    Set-AzContext -SubscriptionId $group.Name -ErrorAction Stop | Out-Null
-    Write-Log "== Subscription: $($group.Name) — $($group.Count) VM(s) to process"
+    $s = 0; $k = 0; $e = 0
 
-    foreach ($vm in $group.Group) {
-
-        $name     = $vm.name
-        $rg       = $vm.resourceGroup
-        $tagValue = $vm.shutdownTime
-        $isLocal  = $vm.type -ilike '*azurestackhci*'
-
-        Write-Log "  $name (RG: $rg) shutdown=$tagValue type=$(if ($isLocal) { 'AzureLocal' } else { 'AzureVM' })"
-
-        if ($isLocal) {
-
-            $powerState = $vm.powerState
-            if ($powerState -eq 'Off' -or $powerState -eq 'Stopped') {
-                Write-Log "    SKIP — already off (state: $powerState)."
-                $stats.SkippedAlreadyOff++
-                continue
-            }
-            if ($WhatIf) {
-                Write-Log "    [WHATIF] Would stop Azure Local VM: $name"
-            } else {
-                try {
-                    $token  = [System.Net.NetworkCredential]::new('', (Get-AzAccessToken -ResourceUrl 'https://management.azure.com').Token).Password
-                    $apiUri = "https://management.azure.com$($vm.id)/stop?api-version=2023-09-01-preview"
-                    Invoke-RestMethod -Uri $apiUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
-                    Write-Log "    SUCCESS — Azure Local VM $name stop request accepted."
-                    $stats.ShutDown++
-                } catch {
-                    Write-Log "    ERROR — $_ " "ERROR"
-                    $stats.Errors++
-                }
-            }
-
+    if ($isLocal) {
+        if ($vm.powerState -eq 'Off' -or $vm.powerState -eq 'Stopped') {
+            Write-Output "$(& $ts)     SKIP — already off (state: $($vm.powerState))."
+            $k = 1
+        } elseif ($whatIf) {
+            Write-Output "$(& $ts)     [WHATIF] Would stop Azure Local VM: $name"
         } else {
-
-            $powerState = $vm.powerState
-            if ($powerState -eq 'VM deallocated') {
-                Write-Log "    SKIP — already deallocated."
-                $stats.SkippedAlreadyOff++
-                continue
+            try {
+                Invoke-RestMethod -Uri "https://management.azure.com$($vm.id)/stop?api-version=2023-09-01-preview" `
+                    -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                Write-Output "$(& $ts)     SUCCESS — Azure Local VM $name stop requested."
+                $s = 1
+            } catch {
+                Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][ERROR]     ERROR $name — $_"
+                $e = 1
             }
-            if ($WhatIf) {
-                Write-Log "    [WHATIF] Would stop (deallocate) VM: $name"
-            } else {
-                try {
-                    Stop-AzVM -ResourceGroupName $rg -Name $name -Force -ErrorAction Stop | Out-Null
-                    Write-Log "    SUCCESS — VM $name deallocated."
-                    $stats.ShutDown++
-                } catch {
-                    Write-Log "    ERROR — $_" "ERROR"
-                    $stats.Errors++
-                }
+        }
+    } else {
+        if ($vm.powerState -eq 'VM deallocated') {
+            Write-Output "$(& $ts)     SKIP — already deallocated."
+            $k = 1
+        } elseif ($whatIf) {
+            Write-Output "$(& $ts)     [WHATIF] Would stop (deallocate) VM: $name"
+        } else {
+            try {
+                Invoke-RestMethod -Uri "https://management.azure.com/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.Compute/virtualMachines/$name/deallocate?api-version=2024-03-01" `
+                    -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                Write-Output "$(& $ts)     SUCCESS — VM $name deallocation requested."
+                $s = 1
+            } catch {
+                Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][ERROR]     ERROR $name — $_"
+                $e = 1
             }
         }
     }
+
+    [pscustomobject]@{ S = $s; K = $k; E = $e }
+} -ThrottleLimit 20)
+
+$statsObjs = $parallelResults | Where-Object { $_ -is [pscustomobject] }
+$stats = @{
+    ShutDown          = [int]($statsObjs | Measure-Object -Property S -Sum).Sum
+    SkippedAlreadyOff = [int]($statsObjs | Measure-Object -Property K -Sum).Sum
+    Errors            = [int]($statsObjs | Measure-Object -Property E -Sum).Sum
 }
 
 #endregion

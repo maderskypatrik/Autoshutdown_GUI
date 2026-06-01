@@ -133,70 +133,67 @@ Write-Log "$(@($toStart).Count) VM(s) are in the current startup window."
 
 #endregion
 
-#region ── Act ───────────────────────────────────────────────────────────────────
+#region ── Act (parallel REST calls — no sequential blocking) ────────────────────
 
-$stats = @{ Started = 0; SkippedAlreadyOn = 0; Errors = 0 }
+$parallelResults = @($toStart | ForEach-Object -Parallel {
+    $vm      = $_
+    $token   = $using:armToken
+    $whatIf  = $using:WhatIf
+    $name    = $vm.name
+    $rg      = $vm.resourceGroup
+    $sub     = $vm.subscriptionId
+    $isLocal = $vm.type -ilike '*azurestackhci*'
+    $type    = if ($isLocal) { 'AzureLocal' } else { 'AzureVM' }
+    $ts      = { "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][INFO]" }
 
-$grouped = @($toStart | Group-Object subscriptionId)
-foreach ($group in $grouped) {
+    Write-Output "$(& $ts)   $name (RG: $rg) startup=$($vm.startupTime) type=$type"
 
-    Set-AzContext -SubscriptionId $group.Name -ErrorAction Stop | Out-Null
-    Write-Log "== Subscription: $($group.Name) — $($group.Count) VM(s) to process"
+    $s = 0; $k = 0; $e = 0
 
-    foreach ($vm in $group.Group) {
-
-        $name     = $vm.name
-        $rg       = $vm.resourceGroup
-        $tagValue = $vm.startupTime
-        $isLocal  = $vm.type -ilike '*azurestackhci*'
-
-        Write-Log "  $name (RG: $rg) startup=$tagValue type=$(if ($isLocal) { 'AzureLocal' } else { 'AzureVM' })"
-
-        if ($isLocal) {
-
-            $powerState = $vm.powerState
-            if ($powerState -eq 'Running') {
-                Write-Log "    SKIP — already running (state: $powerState)."
-                $stats.SkippedAlreadyOn++
-                continue
-            }
-            if ($WhatIf) {
-                Write-Log "    [WHATIF] Would start Azure Local VM: $name"
-            } else {
-                try {
-                    $token  = [System.Net.NetworkCredential]::new('', (Get-AzAccessToken -ResourceUrl 'https://management.azure.com').Token).Password
-                    $apiUri = "https://management.azure.com$($vm.id)/start?api-version=2023-09-01-preview"
-                    Invoke-RestMethod -Uri $apiUri -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
-                    Write-Log "    SUCCESS — Azure Local VM $name start request accepted."
-                    $stats.Started++
-                } catch {
-                    Write-Log "    ERROR — $_" "ERROR"
-                    $stats.Errors++
-                }
-            }
-
+    if ($isLocal) {
+        if ($vm.powerState -eq 'Running') {
+            Write-Output "$(& $ts)     SKIP — already running (state: $($vm.powerState))."
+            $k = 1
+        } elseif ($whatIf) {
+            Write-Output "$(& $ts)     [WHATIF] Would start Azure Local VM: $name"
         } else {
-
-            $powerState = $vm.powerState
-            if ($powerState -eq 'VM running') {
-                Write-Log "    SKIP — already running."
-                $stats.SkippedAlreadyOn++
-                continue
+            try {
+                Invoke-RestMethod -Uri "https://management.azure.com$($vm.id)/start?api-version=2023-09-01-preview" `
+                    -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                Write-Output "$(& $ts)     SUCCESS — Azure Local VM $name start requested."
+                $s = 1
+            } catch {
+                Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][ERROR]     ERROR $name — $_"
+                $e = 1
             }
-            if ($WhatIf) {
-                Write-Log "    [WHATIF] Would start VM: $name"
-            } else {
-                try {
-                    Start-AzVM -ResourceGroupName $rg -Name $name -ErrorAction Stop | Out-Null
-                    Write-Log "    SUCCESS — VM $name started."
-                    $stats.Started++
-                } catch {
-                    Write-Log "    ERROR — $_" "ERROR"
-                    $stats.Errors++
-                }
+        }
+    } else {
+        if ($vm.powerState -eq 'VM running') {
+            Write-Output "$(& $ts)     SKIP — already running."
+            $k = 1
+        } elseif ($whatIf) {
+            Write-Output "$(& $ts)     [WHATIF] Would start VM: $name"
+        } else {
+            try {
+                Invoke-RestMethod -Uri "https://management.azure.com/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.Compute/virtualMachines/$name/start?api-version=2024-03-01" `
+                    -Method POST -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                Write-Output "$(& $ts)     SUCCESS — VM $name start requested."
+                $s = 1
+            } catch {
+                Write-Output "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][ERROR]     ERROR $name — $_"
+                $e = 1
             }
         }
     }
+
+    [pscustomobject]@{ S = $s; K = $k; E = $e }
+} -ThrottleLimit 20)
+
+$statsObjs = $parallelResults | Where-Object { $_ -is [pscustomobject] }
+$stats = @{
+    Started        = [int]($statsObjs | Measure-Object -Property S -Sum).Sum
+    SkippedAlreadyOn = [int]($statsObjs | Measure-Object -Property K -Sum).Sum
+    Errors         = [int]($statsObjs | Measure-Object -Property E -Sum).Sum
 }
 
 #endregion
