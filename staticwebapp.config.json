@@ -1,6 +1,12 @@
 {
+  "routes": [
+    {
+      "route": "/runbooks/*",
+      "allowedRoles": ["anonymous"]
+    }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/function-app.zip", "/version.json"]
+    "exclude": ["/assets/*", "/runbooks/*"]
   }
 }
