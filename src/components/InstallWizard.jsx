@@ -90,7 +90,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
               <div className="tou-box">
                 <p><strong>What will be installed:</strong></p>
                 <ul>
-                  <li>Azure Automation Account with system-assigned managed identity and PowerShell runbooks (runs every 5 minutes)</li>
+                  <li>Azure Automation Account with system-assigned managed identity and PowerShell runbooks (runs every 15 minutes)</li>
                 </ul>
                 <p><strong>Permissions granted to the Automation Account:</strong></p>
                 <ul>
@@ -171,7 +171,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
             <>
               <p className="wizard-intro">
                 {running && 'Deploying Azure resources — this takes a few minutes, please wait…'}
-                {done    && 'Installation complete. The Automation Account runbooks will start on the next 5-minute interval.'}
+                {done    && 'Installation complete. The Automation Account runbooks will start on the next 15-minute interval.'}
                 {failed  && 'Installation encountered an error. Review the log below.'}
               </p>
               <div className="install-log" ref={logRef}>
