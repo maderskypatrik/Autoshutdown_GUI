@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — Multi-Tenant Deployment Guide
 
-**PowerCloud Team · v1.0**
-**Last updated: 2026-04-29**
+**PowerCloud Team · v2.0**
+**Last updated: 2026-06-01**
 
 ---
 
@@ -16,7 +16,7 @@ There are two distinct scenarios:
 | **A — Separate instance per tenant** | Deploy a separate copy of the GUI for each tenant. Simplest, most isolated. |
 | **B — Multi-tenant app registration** | One deployment that accepts users from any Microsoft tenant. More setup, scales better. |
 
-The **Function App** (AutoShutdown V3) is not affected by either option — it is always deployed per-subscription using the signed-in user's own token, so it works identically regardless of which tenant the user belongs to.
+The **Automation Account** is not affected by either option — it is always deployed per-subscription using the signed-in user's own token, so it works identically regardless of which tenant the user belongs to.
 
 ---
 
@@ -33,7 +33,7 @@ clientId:  'YOUR_NEW_CLIENT_ID',
 authority: 'https://login.microsoftonline.com/YOUR_NEW_TENANT_ID',
 ```
 
-Everything else — the Function App install/uninstall logic, the VM table, the GitHub Actions workflow — stays exactly the same.
+Everything else — the Automation Account install/uninstall logic, the VM table, the GitHub Actions workflow — stays exactly the same.
 
 ### Steps
 
@@ -87,7 +87,7 @@ When a user signs in:
 - MSAL authenticates them against their own home tenant
 - The ARM access token is issued for **their** subscriptions
 - The app lists only subscriptions that user has access to
-- The Function App install deploys into whatever subscription they select
+- The Automation Account install deploys into whatever subscription they select
 
 Each user only ever sees and touches their own subscriptions. There is no cross-tenant data leakage.
 
@@ -160,7 +160,7 @@ Invite the Tenant A user as a guest in Tenant B:
 
 **Option 2 — Lighthouse (for MSP / multi-customer scenarios)**
 
-Azure Lighthouse allows a service provider tenant to manage customer subscriptions without needing guest accounts. This is outside the scope of this tool, but if Lighthouse delegated access is configured, the Function App can be installed into the delegated subscription using the provider user's credentials.
+Azure Lighthouse allows a service provider tenant to manage customer subscriptions without needing guest accounts. This is outside the scope of this tool, but if Lighthouse delegated access is configured, the Automation Account can be installed into the delegated subscription using the provider user's credentials.
 
 ---
 
@@ -172,9 +172,9 @@ Azure Lighthouse allows a service provider tenant to manage customer subscriptio
 | **Maintenance** | One deployment per tenant | One deployment for all |
 | **Access control** | Tight — only one tenant per instance | Loose — any org can use it |
 | **Recommended for** | Internal enterprise, controlled rollout | Cross-org platforms, MSP use |
-| **Function App** | Unchanged — works the same | Unchanged — works the same |
+| **Automation Account** | Unchanged — works the same | Unchanged — works the same |
 | **Changes required** | New App Registration + new SWA + new authConfig | Authority `→ organizations` + App Registration setting |
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Multi-Tenant Deployment Guide · v1.0*
+*PowerCloud Team · VM Auto-shutdown Manager · Multi-Tenant Deployment Guide · v2.0*

@@ -1,7 +1,7 @@
 # VM Auto-shutdown — Terms of Use
 
-**PowerCloud Team · v1.0 · Internal use only**
-**Last updated: 2026-04-29**
+**PowerCloud Team · v2.0 · Internal use only**
+**Last updated: 2026-06-01**
 
 ---
 
@@ -15,27 +15,31 @@ These Terms of Use govern the installation and use of the VM Auto-shutdown & Aut
 
 The installer deploys the following Azure resources into the selected subscription and resource group:
 
-- **User-Assigned Managed Identity** — used by the Function App to authenticate against Azure
-- **Storage Account** — required by Azure Functions (Standard LRS, minimal cost)
-- **App Service Plan** — Consumption (Y1) plan, serverless, ~free at this scale
-- **Function App** — PowerShell 7.4 runtime, runs on the Consumption plan
+- **Azure Automation Account** — hosts the shutdown and startup runbooks; runs on a 15-minute schedule
+- **System-assigned managed identity** — created automatically with the Automation Account; used to authenticate against Azure Resource Manager
 
-The Managed Identity is assigned **Virtual Machine Contributor** and **Reader** roles at subscription scope, allowing the Function App to list and control all VMs in the subscription.
+The following RBAC role assignments are made:
 
-Function code is loaded directly from this web application (`WEBSITE_RUN_FROM_PACKAGE`). No code is uploaded manually.
+- **Reader** at subscription scope — allows the runbooks to query Resource Graph for VMs
+- **Virtual Machine Contributor** at subscription scope — allows the runbooks to deallocate and start VMs
+- **Automation Contributor** at resource group scope — scoped to the Automation Account's own resource group only
+
+No storage account, application insights, or other auxiliary resources are created. There is no inbound surface — the Automation Account only makes outbound calls to Azure Resource Manager.
 
 ---
 
 ## 3. How the Solution Works
 
-Once installed, the Function App runs every 15 minutes. It evaluates every VM in the subscription:
+Once installed, the Automation Account runs two PowerShell runbooks every 15 minutes:
 
-- VMs tagged `shutdown = HH:mm` are deallocated at that local time each day
-- VMs tagged `startup = HH:mm` are started at that local time each day
-- VMs tagged `donotshutdown` or `donotstart` are always skipped
+- **AutoShutdown** — VMs tagged `shutdown = HH:mm` are deallocated at that local time each day
+- **AutoStartup** — VMs tagged `startup = HH:mm` are started at that local time each day
+- VMs tagged `donotshutdown` or `donotstart` are always skipped for the respective action
 - VMs with no relevant tags are never touched
 
 Shutdown and startup times are evaluated in the timezone configured at install time (default: Central European Standard Time).
+
+The Automation Account operates within the subscription it was installed into only. It has no access to other subscriptions.
 
 ---
 
@@ -45,8 +49,8 @@ Shutdown and startup times are evaluated in the timezone configured at install t
 
 The Installer is responsible for:
 
-- Ensuring they have the appropriate Azure permissions to deploy resources (Contributor on the resource group, and Owner or User Access Administrator at subscription scope for role assignments)
-- Deploying into an appropriate resource group and naming resources appropriately
+- Ensuring they have the appropriate Azure permissions (Owner on the subscription) to deploy resources and assign roles
+- Deploying into an appropriate resource group and naming the Automation Account appropriately
 - Informing VM owners in the subscription that scheduled shutdown/startup is active
 
 ### 4.2 VM owner responsibilities
@@ -77,21 +81,27 @@ This includes but is not limited to:
 
 ### 5.2 No guarantee of execution
 
-The Solution operates on a best-effort basis. Factors outside the team's control — including Azure service outages, Function App failures, or network issues — may cause a scheduled run to be delayed, skipped, or fail.
+The Solution operates on a best-effort basis. Factors outside the team's control — including Azure service outages, Automation Account job failures, or Resource Graph indexing delays — may cause a scheduled run to be delayed, skipped, or fail.
 
 ### 5.3 No liability for Azure costs
 
-The deployed resources incur Azure costs (Storage Account, Function App execution). These costs are the responsibility of the subscription owner. At typical usage levels the cost is negligible, but the PowerCloud Team accepts no responsibility for any charges incurred.
+The deployed resources incur minimal Azure costs (Azure Automation free tier includes 500 job minutes/month; typical usage is well within this limit). These costs are the responsibility of the subscription owner. The PowerCloud Team accepts no responsibility for any charges incurred.
 
 ---
 
-## 6. Uninstallation
+## 6. Updates
 
-The Solution can be uninstalled at any time using the **Uninstall** button in the AutoShutdown Manager. This removes all deployed Azure resources and role assignments. VM tags are not modified by the uninstaller — any enrolled VMs will retain their tags but will no longer be acted on.
+When a new version of the runbooks is released, users will see an **"Update available"** button in the app. Clicking it re-publishes the runbooks into the existing Automation Account without removing any resources or schedules. Updates do not require reinstallation.
 
 ---
 
-## 7. Acceptance
+## 7. Uninstallation
+
+The Solution can be uninstalled at any time using the **Uninstall** button in the AutoShutdown Manager. This removes all RBAC role assignments and deletes the Automation Account (the system-assigned managed identity is deleted automatically with it). VM tags are not modified by the uninstaller — any enrolled VMs will retain their tags but will no longer be acted on.
+
+---
+
+## 8. Acceptance
 
 Clicking **I Agree** and proceeding with the installation constitutes acceptance of these Terms of Use.
 
@@ -99,4 +109,4 @@ If you do not agree, click Cancel.
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Terms of Use · v1.0*
+*PowerCloud Team · VM Auto-shutdown Manager · Terms of Use · v2.0*

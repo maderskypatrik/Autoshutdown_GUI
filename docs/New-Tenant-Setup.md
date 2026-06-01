@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — Setting Up for a Different Tenant
 
-**PowerCloud Team · v1.0**
-**Last updated: 2026-04-29**
+**PowerCloud Team · v2.0**
+**Last updated: 2026-06-01**
 
 ---
 
@@ -95,9 +95,9 @@ GitHub Actions builds and deploys. Users in the new tenant can now sign in and u
 
 ### Installation fails with "HTTP 409"
 
-Function App names must be globally unique across all of Azure. If the name you entered is already taken (by another Azure customer or reserved from a previously deleted app), Azure returns HTTP 409.
+Automation Account names must be unique within the Azure region. If the name you entered is already taken, Azure returns HTTP 409.
 
-**Fix:** retry the installation with a more unique name, e.g. `func-autoshutdown-yourcompany` or `func-autoshutdown-abc`.
+**Fix:** retry the installation with a more unique name, e.g. `aa-autoshutdown-yourcompany`.
 
 ---
 
@@ -108,8 +108,10 @@ Because `authConfig.js` is baked into the build, one deployed instance = one ten
 - Use **separate branches** in the same repo, each with its own `authConfig.js` and GitHub Actions workflow pointing to its own SWA and secret
 - Or use **separate forked repositories**, one per tenant
 
-The Function App (AutoShutdown V3) is not affected by any of this — it always deploys per-subscription using the signed-in user's own token, regardless of which tenant they belong to.
+The Automation Account is not affected by any of this — it always deploys per-subscription using the signed-in user's own token, regardless of which tenant they belong to.
+
+For a full comparison of per-tenant vs. multi-tenant options, see [Multi-Tenant-Deployment.md](Multi-Tenant-Deployment.md).
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · New Tenant Setup · v1.0*
+*PowerCloud Team · VM Auto-shutdown Manager · New Tenant Setup · v2.0*

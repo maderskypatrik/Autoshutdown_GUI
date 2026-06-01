@@ -1,7 +1,7 @@
 # VM Auto-shutdown Manager — Setup Guide
 
-**PowerCloud Team · v1.1**
-**Last updated: 2026-05-06**
+**PowerCloud Team · v2.0**
+**Last updated: 2026-06-01**
 
 ---
 
@@ -13,7 +13,7 @@ This guide walks you through the full setup from zero to a running web app. The 
 
 1. Entra ID App Registration (so users can sign in and call Azure APIs)
 2. GitHub repository (to host and deploy the code)
-3. Azure Static Web App (to host the frontend)
+3. Azure Static Web App (to host the frontend and serve runbook scripts)
 4. GitHub secret (to connect GitHub Actions to Azure)
 5. `authConfig.js` (two values to fill in from Step 1)
 
@@ -66,8 +66,8 @@ Keep these — you will paste them into `src/authConfig.js` in Step 5.
 5. Click **Add permissions**
 6. Click **Grant admin consent for [your tenant]** → confirm
 
-> **Why this permission?**  
-> `user_impersonation` allows the app to call Azure Management APIs (list subscriptions, resource groups, VMs, update tags) on behalf of the signed-in user. The user's own Azure RBAC permissions are enforced — they can only see and modify what they already have access to.
+> **Why this permission?**
+> `user_impersonation` allows the app to call Azure Management APIs (list subscriptions, resource groups, VMs, update tags, create Automation Accounts) on behalf of the signed-in user. The user's own Azure RBAC permissions are enforced — they can only see and modify what they already have access to.
 
 ### 1.5 Add the production redirect URI
 
@@ -102,7 +102,7 @@ git push -u origin main
 
 ## Step 3 — Create the Azure Static Web App
 
-Azure Static Web Apps hosts the frontend and auto-generates a GitHub Actions deployment workflow.
+Azure Static Web Apps hosts the frontend and auto-generates a GitHub Actions deployment workflow. It also serves the runbook PowerShell scripts from `/runbooks/` — these are fetched by the installer at deploy time.
 
 ### 3.1 Create the resource
 
@@ -205,9 +205,9 @@ Open `http://localhost:5173` in your browser. You should see the login screen.
 
 Click **Sign in with Microsoft** — you are redirected to the Microsoft login page and back. After signing in:
 - The subscription dropdown populates
-- Select a subscription → Resource Groups load
+- Select a subscription → Resource Groups load and the install status banner appears
 - Select a Resource Group (or leave as "All") → click **Load VMs**
-- VMs appear in the table with their current shutdown/startup tag values
+- VMs appear in the table with their current shutdown/startup tag values and live power state
 
 ---
 
@@ -225,36 +225,21 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 | Action | What happens |
 |---|---|
 | Sign in | MSAL.js authenticates with Entra ID and gets an ARM access token |
-| Load VMs | App calls Azure Resource Graph API with the user's token — returns all VM names, RGs, current tags, and power state |
+| Load VMs | App calls Resource Graph for tags and metadata, then ARM `statusOnly=true` for real-time power state |
 | Edit time | User types a time in `HH:mm` format — change is tracked locally, not saved yet |
 | Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
 | Save Changes | For each modified VM, app calls the Azure VM PATCH API to update the tag set. If a shutdown or startup time is set, `autoshutdown-enrolled` is added automatically. If both times are cleared, it is removed. |
-| Function App | Every 15 minutes, queries Resource Graph for VMs that have **both** `autoshutdown-enrolled` and `shutdown`/`startup` tags, then acts only on those in the current time window |
-| Self-update | On every invocation, each Function App compares its running version against `version.json` on the SWA. If a newer version is available it restarts itself using its own Managed Identity, forcing Azure to download the new zip. No central credential required. |
+| Auto-refresh | Every 30 seconds while the VM table is visible, the app polls the ARM `statusOnly` endpoint and updates power state in place — no full reload needed |
+| Automation | Every 15 minutes, the Automation Account runbooks query Resource Graph for VMs that have both `autoshutdown-enrolled` and `shutdown`/`startup` tags, then act on those in the current time window |
 | Return later | App always reads current tag values from Azure — it is stateless |
 
-Times are in **local time** as configured by the `TIMEZONE` app setting of the Function App (default: `Central European Standard Time`).
+Times are in **local time** as configured by the `TimeZoneId` parameter on the runbook schedule (set at install time, default: `Central European Standard Time`).
 
 ### VM enrollment security model
 
-The `autoshutdown-enrolled` tag acts as an explicit allowlist gate at the Function App level. The UI manages it automatically — it is added when a schedule is saved and removed when both times are cleared. A VM with a `shutdown` tag but without `autoshutdown-enrolled` is completely ignored by the Function App.
+The `autoshutdown-enrolled` tag acts as an explicit allowlist gate at the runbook level. The UI manages it automatically. A VM with a `shutdown` tag but without `autoshutdown-enrolled` is completely ignored by the runbooks.
 
 All tag writes go through the Azure VM PATCH API (`Microsoft.Compute/virtualMachines/write`), which Azure enforces server-side. Users with Tag Contributor role receive a 403 and cannot modify any VM schedules.
-
----
-
-## Covering multiple subscriptions
-
-The Function App is installed once but can manage VMs across any number of subscriptions without reinstalling. For each additional subscription you want covered:
-
-1. Go to **Azure Portal** → the target subscription → **Access control (IAM)**
-2. Click **+ Add** → **Add role assignment**
-3. Assign **Reader** to the Managed Identity (`mi-autoshutdown` or as tagged on the Function App)
-4. Repeat for **Virtual Machine Contributor**
-
-The Function App uses Azure Resource Graph to discover all tagged VMs across every subscription its Managed Identity can access, so the new subscription is picked up automatically on the next run.
-
-To find the Managed Identity name: open the Function App in the portal → **Tags** → copy the value of `autoshutdown-mi-principal-id`, then look it up under **Entra ID** → **Managed identities**.
 
 ---
 
@@ -266,10 +251,8 @@ To find the Managed Identity name: open the Function App in the portal → **Tag
 | Set or change shutdown / startup times | **Owner**, **Contributor**, or **Virtual Machine Contributor** on the subscription, resource group, or VM |
 | Exclude a VM from shutdown or startup | Same as above |
 | Install the AutoShutdown solution | **Owner** on the subscription |
-
-Users with only Reader access can see VMs and their current power state but cannot make any changes.
-
-All write operations go through the Azure VM PATCH API, which enforces `Microsoft.Compute/virtualMachines/write`. Tag Contributor alone is not sufficient — users with only Tag Contributor will receive a permission error when attempting to save.
+| Update runbooks | **Owner** or **Contributor** on the subscription |
+| Uninstall the AutoShutdown solution | **Owner** on the subscription |
 
 ---
 
@@ -290,11 +273,11 @@ The signed-in user has no Reader access on any subscription. Ask a subscription 
 
 The user can read VMs but cannot write tags. Ask a subscription admin to assign **Owner**, **Contributor**, or **Virtual Machine Contributor** on the relevant subscription, resource group, or VM. Tag Contributor is not sufficient.
 
-### Installation fails with "HTTP 409" on Function App creation
+### Installation fails with "HTTP 409" on Automation Account creation
 
-Function App names must be globally unique across all of Azure. If the name you entered is already taken (by another Azure customer or reserved from a previously deleted app), Azure returns HTTP 409.
+Automation Account names must be unique within the Azure region. If the name you entered is already taken, Azure returns HTTP 409.
 
-**Fix:** retry the installation with a more unique name, e.g. `func-autoshutdown-yourcompany` or `func-autoshutdown-abc`.
+**Fix:** retry the installation with a more unique name, e.g. `aa-autoshutdown-yourcompany` or `aa-autoshutdown-prod`.
 
 ### GitHub Actions deployment fails
 
@@ -303,7 +286,7 @@ Function App names must be globally unique across all of Azure. If the name you 
 
 ### App loads but sign-in does not complete
 
-The app uses redirect-based login (no popup). If the sign-in loop repeats without completing, check that the redirect URI is registered correctly in the App Registration → Authentication (see Step 1.5).
+The app uses redirect-based login. If the sign-in loop repeats without completing, check that the redirect URI is registered correctly in the App Registration → Authentication (see Step 1.5).
 
 ---
 
@@ -319,15 +302,13 @@ git commit -m "your change"
 git push
 ```
 
-### Function App changes (PowerShell scripts)
+### Runbook changes (PowerShell scripts)
 
-1. Make your changes to the scripts under `public/function-app/`
-2. Bump the version in `package.json` (e.g. `"version": "1.1.0"`)
+1. Make your changes to the scripts under `public/runbooks/`
+2. Bump `RUNBOOK_VERSION` in `src/services/deploy.js` (e.g. `'20260601'` → `'20260615'`)
 3. Commit and push to `main`
 
-GitHub Actions will write the new version into `version.txt` (baked into the zip) and `version.json` (served by the SWA). Within one 15-minute timer cycle, every installed Function App detects the mismatch, restarts itself, and downloads the new zip automatically.
-
-No access to individual subscriptions is required. The update happens independently in each subscription using only that subscription's own Managed Identity.
+Once deployed, any user who opens the app against a subscription with the old version will see an amber **"Update available"** button in the install status bar. Clicking it re-publishes both runbooks into the existing Automation Account — no reinstall, no downtime, no RBAC changes.
 
 ---
 
@@ -335,7 +316,8 @@ No access to individual subscriptions is required. The update happens independen
 
 - [Multi-Tenant-Deployment.md](Multi-Tenant-Deployment.md) — deploying for a different or additional Azure AD tenant
 - [User-Guide.md](User-Guide.md) — end-user guide for navigating the app and setting schedules
+- [Architecture.md](Architecture.md) — technical deep-dive
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Setup Guide · v1.0*
+*PowerCloud Team · VM Auto-shutdown Manager · Setup Guide · v2.0*

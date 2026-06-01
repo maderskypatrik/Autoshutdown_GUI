@@ -1,6 +1,6 @@
 # VM Auto-shutdown Manager — Architecture
 
-**PowerCloud Team · Last updated: 2026-05-06**
+**PowerCloud Team · Last updated: 2026-06-01**
 
 ---
 
@@ -19,19 +19,21 @@ The solution has two independent layers that share data only through Azure VM ta
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Azure Resource Manager                                          │
-│  Resource Graph (read VMs + tags + power state)                  │
+│  Resource Graph (read VMs + tags)                                │
+│  ARM instanceView statusOnly (real-time power state)             │
 │  VM PATCH API (write tags — requires virtualMachines/write)      │
 └──────────────────────┬───────────────────────────────────────────┘
                        │ VM tags (shared state)
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  Azure Function App  (PowerShell, timer-triggered)               │
-│  Runs every 15 min — reads tags via Resource Graph               │
+│  Azure Automation Account  (PowerShell 7.2 runbooks)             │
+│  Runs every 15 minutes — reads tags via Resource Graph REST API  │
 │  Shuts down / starts up VMs independently of the browser         │
+│  System-assigned managed identity — scoped to own subscription   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-There is no backend API, no database, and no shared secrets. The browser calls Azure directly. The Function App runs on its own timer. Both read VM tags from Azure; neither knows about the other.
+There is no backend API, no database, no storage account, and no shared secrets. The browser calls Azure directly. The Automation Account runs on its own schedule. Both read VM tags from Azure; neither knows about the other.
 
 ---
 
@@ -39,12 +41,12 @@ There is no backend API, no database, and no shared secrets. The browser calls A
 
 ### Hosting
 
-React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions. The SWA also serves two static assets used by the Function Apps:
+React SPA built with Vite, deployed to **Azure Static Web Apps** via GitHub Actions. The SWA also serves the runbook PowerShell scripts as static files:
 
-- `/function-app.zip` — the Function App package, deployed on every push to `main`
-- `/version.json` — current version string (e.g. `{"version":"1.1.0"}`), written by GitHub Actions before deploy
+- `/runbooks/AutoShutdown.ps1`
+- `/runbooks/AutoStartup.ps1`
 
-Both files are generated automatically — no manual steps needed on release.
+These files are fetched by the installer at deploy time and published into the Automation Account. No build step is needed — they are plain static files under `public/runbooks/`.
 
 ### Authentication
 
@@ -61,13 +63,14 @@ src/
 │   ├── LoginPage.jsx          Unauthenticated landing page with Sign-in button
 │   ├── Header.jsx             Top bar: app title + signed-in username + sign-out
 │   ├── Controls.jsx           Subscription dropdown, Resource Group dropdown, Load VMs button
-│   ├── SubscriptionStatus.jsx Install status bar (checking / not installed / installed)
+│   ├── SubscriptionStatus.jsx Install status bar (checking / not installed / installed / update available)
 │   ├── VMTable.jsx            VM list with schedule editors and power state
-│   ├── InstallWizard.jsx      Multi-step modal to deploy Function App into a subscription
-│   └── UninstallDialog.jsx    Confirmation modal to remove all AutoShutdown resources
+│   ├── InstallWizard.jsx      Multi-step modal to deploy Automation Account into a subscription
+│   ├── UninstallDialog.jsx    Confirmation modal to remove all AutoShutdown resources
+│   └── UpdateDialog.jsx       Modal to re-publish runbooks without removing any resources
 └── services/
-    ├── azure.js               ARM read/write calls (subscriptions, RGs, VMs, tags)
-    └── deploy.js              Install, uninstall, and detectInstallation logic
+    ├── azure.js               ARM read/write calls (subscriptions, RGs, VMs, tags, power state refresh)
+    └── deploy.js              Install, update, uninstall, and detectInstallation logic
 ```
 
 ### State management (`App.jsx`)
@@ -80,11 +83,11 @@ All application state lives in `App.jsx`. No external state library. Key state:
 | `selectedSubId` | Currently selected subscription |
 | `resourceGroups` | RGs in the selected subscription |
 | `selectedRg` | Currently selected RG (empty = all) |
-| `vms` | VM list as returned by Resource Graph (source of truth from Azure) |
+| `vms` | VM list (tags from Resource Graph, power state from ARM statusOnly) |
 | `edits` | Map of `vmId → { shutdown, startup, noShutdown, noStart }` — local unsaved changes |
 | `installStatus` | `null / 'checking' / { installed: false } / { installed: true, ...details }` |
 
-`edits` is initialised from `vms` when VMs load, and re-synced after a successful save. `vms` is never mutated in place — it is updated with the saved tag values after a successful save.
+`edits` is initialised from `vms` when VMs load and re-synced after a successful save. A 30-second interval updates only `powerState` on each VM while the table is visible, without touching tags or edits.
 
 ---
 
@@ -98,10 +101,11 @@ All direct ARM API calls. Uses the user's token — Azure enforces their RBAC.
 |---|---|---|
 | `getSubscriptions` | `GET /subscriptions` | Lists all subscriptions the user has Reader on |
 | `getResourceGroups` | `GET /subscriptions/{sub}/resourcegroups` | Lists RGs in a subscription |
-| `getVMs` | Resource Graph POST | Returns VMs with tags and power state |
+| `getVMs` | Resource Graph POST + ARM statusOnly GET | Phase 1: tags and metadata; Phase 2: real-time power state |
+| `refreshVMPowerStates` | `GET …/virtualMachines?statusOnly=true` | Lightweight poll — only power state, no tags |
 | `patchVMTags` | `PATCH {vmId}?api-version=2024-03-01` | Requires `Microsoft.Compute/virtualMachines/write` |
 
-The `getVMs` Resource Graph query projects: `id`, `name`, `resourceGroup`, `tags`, `location`, `powerState`.
+`getVMs` uses two separate calls because Resource Graph caches power state and can lag by several minutes. The ARM `statusOnly=true` endpoint returns real-time data and is used for both initial load and the 30-second background refresh.
 
 ### `src/services/deploy.js`
 
@@ -109,13 +113,18 @@ Handles installation lifecycle. Uses the user's token — requires Owner on the 
 
 | Function | What it does |
 |---|---|
-| `detectInstallation` | Resource Graph query for a `microsoft.web/sites` resource tagged `autoshutdown-managed=v3` in the subscription |
-| `installAutoShutdown` | Creates MI → Storage Account → App Service Plan → Application Insights → Function App → RBAC assignments |
-| `uninstallAutoShutdown` | Removes RBAC role assignments, then deletes all resources tagged `autoshutdown-managed=v3` |
+| `detectInstallation` | Resource Graph query for an `microsoft.automation/automationaccounts` resource tagged `autoshutdown-managed=v4-automation` |
+| `installAutoShutdown` | Creates Automation Account (system-assigned MI) → assigns RBAC → fetches and publishes runbooks → creates schedules and links them |
+| `updateRunbooks` | Re-fetches runbooks from SWA origin, re-publishes both, stamps new `autoshutdown-version` tag on the account |
+| `uninstallAutoShutdown` | Removes RBAC role assignments, then deletes the Automation Account (system-assigned MI is deleted automatically) |
+
+`RUNBOOK_VERSION` is exported from `deploy.js` and compared against the `autoshutdown-version` tag on the installed account. When they differ, `SubscriptionStatus` shows an amber **"Update available"** button.
 
 ---
 
 ## Tag Schema
+
+### VM scheduling tags
 
 All scheduling data is stored as Azure tags on the VM. No other data store.
 
@@ -123,7 +132,7 @@ All scheduling data is stored as Azure tags on the VM. No other data store.
 |---|---|---|
 | `shutdown` | `HH:mm` (e.g. `18:30`) | Daily shutdown time in configured timezone |
 | `startup` | `HH:mm` (e.g. `07:00`) | Daily startup time in configured timezone |
-| `autoshutdown-enrolled` | any (e.g. `true`) | Marks VM as managed — Function App ignores VMs without this tag |
+| `autoshutdown-enrolled` | any (e.g. `true`) | Marks VM as managed — runbooks ignore VMs without this tag |
 | `donotshutdown` | any | Prevents automatic shutdown regardless of `shutdown` tag |
 | `donotstart` | any | Prevents automatic startup regardless of `startup` tag |
 
@@ -133,110 +142,64 @@ All scheduling data is stored as Azure tags on the VM. No other data store.
 
 | Tag | Set on | Value | Purpose |
 |---|---|---|---|
-| `autoshutdown-managed` | Function App, storage, plan, MI, AI | `v3` | Identifies resources owned by this solution (used by uninstall) |
-| `autoshutdown-mi-principal-id` | Function App only | MI principal ID (GUID) | Used by uninstall to look up and remove RBAC role assignments |
+| `autoshutdown-managed` | Automation Account | `v4-automation` | Identifies resources owned by this solution (used by uninstall and detectInstallation) |
+| `autoshutdown-version` | Automation Account | Date string e.g. `20260601` | Runbook version stamp — compared against app constant to show update prompt |
 
 ---
 
-## Function App
+## Automation Account
 
 ### Infrastructure
 
-- **Runtime:** PowerShell 7.4
-- **Hosting plan:** Consumption (Y1/Dynamic) — billed per execution, free tier covers normal usage
-- **Deployment:** `WEBSITE_RUN_FROM_PACKAGE` pointing to `/function-app.zip` on the Static Web App URL
-- **Identity:** User-Assigned Managed Identity with Reader + Virtual Machine Contributor at subscription scope
-- **Monitoring:** Application Insights (connection string in app settings)
-- **Module dependencies:** managed by Azure Functions (`requirements.psd1`) — `Az.Accounts 3.*`, `Az.Compute 8.*`, `Az.ResourceGraph 1.*`
+- **Runtime:** PowerShell 7.2 (built-in Az.Accounts and Az.Compute — no module imports required)
+- **Schedule:** every 15 minutes, aligned to clock boundaries (`:00`, `:15`, `:30`, `:45`)
+- **Identity:** System-assigned managed identity — Reader + VM Contributor (subscription scope), Automation Contributor (resource group scope)
+- **Monitoring:** Azure Automation Jobs — every execution is logged under the Automation Account → Jobs in the Azure Portal
+- **Subscription scope:** one Automation Account per subscription; runbooks query Resource Graph scoped to their own subscription only
 
-> **Important:** The Function App caches the zip locally. After updating the zip (code change), the Function App must be restarted in the portal to force re-download.
+### Runbooks
 
-### Functions
+#### `AutoShutdown` — every 15 minutes
 
-#### `Invoke-AutoShutdown` — every 15 minutes (`0 */15 * * * *`)
+1. Acquires ARM token via system-assigned managed identity (`Connect-AzAccount -Identity`)
+2. Queries Resource Graph via `Invoke-RestMethod` for all VMs with both `shutdown` and `autoshutdown-enrolled` tags in the subscription
+3. Filters to VMs whose `shutdown` time falls within the current 15-minute window
+4. Skips VMs tagged `donotshutdown`
+5. Skips VMs already deallocated / powered off
+6. Deallocates Azure VMs (REST `POST .../deallocate`) or stops Azure Local VMs (REST `POST .../stop`) in parallel (`ForEach-Object -Parallel`, throttle 20)
 
-1. Queries Resource Graph for all VMs with both `shutdown` and `autoshutdown-enrolled` tags
-2. Filters to VMs whose `shutdown` time falls within the current 15-minute window
-3. Skips VMs tagged `donotshutdown`
-4. Skips VMs already deallocated / powered off
-5. Deallocates Azure VMs (`Stop-AzVM -Force`) or stops Azure Local VMs (REST API)
+#### `AutoStartup` — every 15 minutes
 
-#### `Invoke-AutoStartup` — every 15 minutes (`0 */15 * * * *`)
-
-Same logic as AutoShutdown but in reverse:
+Same structure as AutoShutdown but in reverse:
 
 1. Queries Resource Graph for VMs with `startup` + `autoshutdown-enrolled`
 2. Filters to current 15-minute window
 3. Skips VMs tagged `donotstart`
 4. Skips VMs already running
-5. Starts Azure VMs (`Start-AzVM`) or Azure Local VMs (REST API)
-
-#### `Invoke-Report` — daily at 06:00 UTC (`0 0 6 * * *`)
-
-1. Lists all subscriptions the MI has access to
-2. Queries Resource Graph for all VMs with `shutdown` or `startup` tags
-3. Builds an HTML email summarising enrolled VMs per subscription
-4. Sends via Microsoft Graph API (`POST /users/{sender}/sendMail`)
-
-Requires `REPORT_SENDER` and `REPORT_RECIPIENT` app settings. Requires the MI to have `Mail.Send` Graph API permission (not assigned by the installer — must be added manually if the report feature is needed).
+5. Starts Azure VMs (REST `POST .../start`) or Azure Local VMs (REST `POST .../start`) in parallel
 
 ### Time window logic (`Test-InWindow`)
 
 ```
 Target time: e.g. 18:30
-Current time window: 18:29:30 → 18:44:59 (15 min window, 30s early buffer)
+Current time window: 18:29:30 → 18:44:59  (15 min window, 30s early buffer)
 
-$Now >= $target.AddSeconds(-30)   ← 30s buffer for timer early-fire jitter
+$Now >= $target.AddSeconds(-30)   ← 30s buffer for scheduler early-fire jitter
 $Now <  $target.AddMinutes(15)    ← window end
 ```
 
-The 30-second lower-bound buffer exists because Azure timer triggers can fire up to ~1 second before the scheduled boundary, causing `$Now >= $target` to fail by milliseconds on the minute boundary.
-
 ### VM type handling
-
-The Function App handles two VM types differently:
 
 | VM type | Resource Graph type | Stop | Start | Already-off check |
 |---|---|---|---|---|
-| Azure VM | `microsoft.compute/virtualmachines` | `Stop-AzVM -Force` | `Start-AzVM` | `powerState == 'VM deallocated'` |
+| Azure VM | `microsoft.compute/virtualmachines` | REST `POST .../deallocate` | REST `POST .../start` | `powerState == 'VM deallocated'` |
 | Azure Local (HCI) | `microsoft.azurestackhci/virtualmachineinstances` | REST `POST .../stop` | REST `POST .../start` | `powerState == 'Off' or 'Stopped'` |
 
-### Self-update mechanism
+### Resource Graph — why REST instead of Search-AzGraph
 
-Every Function App updates itself automatically when a new version is deployed — no central credential or cross-subscription access required.
+The PS 7.2 sandbox has a built-in version of Az.Accounts that conflicts with the Az.ResourceGraph module's assembly loader. Installing Az.ResourceGraph into the PS 7.2 module store causes an `AzAssemblyLoadContextInitializer` error at runtime.
 
-**On every timer invocation**, each `run.ps1` calls `Invoke-VersionCheck` (defined in `profile.ps1`) before doing any work:
-
-```
-Timer fires → Invoke-VersionCheck runs
-  1. Reads version.txt from inside the running zip  (e.g. "1.0.0")
-  2. Fetches {SWA_URL}/version.json  (e.g. {"version":"1.1.0"})
-  3. If versions match → returns false → normal processing continues
-  4. If mismatch → calls ARM restart API using own MI token → returns true
-     → run.ps1 exits early (one invocation skipped)
-     → Azure restarts the Function App and re-downloads the new zip
-     → Next invocation: version.txt = "1.1.0" → no mismatch → resumes normally
-```
-
-`version.json` is a public static file — no authentication needed to read it. The MI only calls the ARM restart API on itself, scoped to its own resource group.
-
-**Rollout time after a new deploy:** all Function Apps update within one 15-minute timer cycle, independently, with no central orchestration.
-
-**Note:** Function Apps installed with an older version of the installer (before `FUNCTION_APP_RESOURCE_ID` and Website Contributor were added) will not self-update. They must be restarted manually or via [scripts/Update-FunctionApps.ps1](../scripts/Update-FunctionApps.ps1) using credentials scoped to that specific subscription.
-
-### Critical implementation note — tag reading
-
-`Search-AzGraph` returns the `tags` property as a Newtonsoft `JObject` wrapped in `PSCustomObject`. PowerShell's `PSObject.Properties` cannot enumerate JObject keys, so standard tag-reading patterns fail silently (always returning null).
-
-**Fix:** Tag values are extracted as plain typed columns directly in the KQL query:
-
-```kql
-| project
-    shutdownTime  = tostring(tags.shutdown),
-    doNotShutdown = isnotnull(tags.donotshutdown)
-```
-
-This bypasses PowerShell-side tag parsing entirely. Do not use PowerShell to read `.tags.shutdown` or similar on objects returned by `Search-AzGraph`.
+**Fix:** both runbooks call the Resource Graph REST endpoint directly via `Invoke-RestMethod` with the managed identity ARM token. This requires no module imports and is more reliable.
 
 ---
 
@@ -246,13 +209,15 @@ This bypasses PowerShell-side tag parsing entirely. Do not use PowerShell to rea
 
 ```
 User selects subscription
-  → detectInstallation (Resource Graph: find web/sites with autoshutdown-managed=v3)
+  → detectInstallation (Resource Graph: find automation/automationaccounts tagged v4-automation)
   → getResourceGroups (ARM list RGs)
 User clicks Load VMs
-  → getVMs (Resource Graph query)
-     Projects: id, name, resourceGroup, tags, location, powerState
+  → getVMs:
+     Phase 1: Resource Graph query — id, name, resourceGroup, tags, location
+     Phase 2: ARM /virtualMachines?statusOnly=true — real-time powerState
   → App initialises edits map from current tag values
-  → VMTable renders with current state
+  → VMTable renders
+  → 30s interval starts to refresh powerState in background
 ```
 
 ### 2. User saves a schedule
@@ -275,14 +240,30 @@ User clicks Save Changes
 ### 3. Automation runs (every 15 min)
 
 ```
-Timer fires
-  → Test-InWindow: is current local time within any VM's window?
-  → Resource Graph: find all VMs with shutdown/startup + autoshutdown-enrolled
-  → For each VM in window:
+Schedule fires
+  → Connect-AzAccount -Identity (system-assigned MI)
+  → Get-AzAccessToken → call Resource Graph REST endpoint
+  → Find all VMs with shutdown/startup + autoshutdown-enrolled in this subscription
+  → For each VM in window (ForEach-Object -Parallel, throttle 20):
      - Skip if donotshutdown / donotstart
      - Skip if already in desired power state
-     - Act: Stop-AzVM or Start-AzVM (or REST for Azure Local)
-  → Log summary to Application Insights
+     - Act: REST deallocate or start (fire-and-forget, 202 Accepted)
+  → Print summary to job output
+```
+
+### 4. Runbook update
+
+```
+Admin pushes runbook code change to GitHub → bumps RUNBOOK_VERSION in deploy.js
+  → SWA redeploys automatically (GitHub Actions)
+  → /runbooks/AutoShutdown.ps1 and AutoStartup.ps1 updated on SWA
+User opens app
+  → detectInstallation returns installed version tag
+  → SubscriptionStatus: autoshutdown-version tag != RUNBOOK_VERSION → "Update available" shown
+User clicks "Update available"
+  → updateRunbooks: fetches new PS1 files from SWA, PUT + publish to Automation Account
+  → PATCH Automation Account tags with new RUNBOOK_VERSION
+  → Button disappears; no downtime, no RBAC or schedule changes
 ```
 
 ---
@@ -292,26 +273,25 @@ Timer fires
 Runs entirely in the browser using the user's token (must be Owner on subscription).
 
 ```
-1. Read resource group location (determines Azure region for all resources)
-2. Create User-Assigned Managed Identity (mi-autoshutdown)
-3. Create Storage Account (stautoshutdown{rand4}, Standard_LRS)
-   └── Poll until provisioningState == Succeeded (up to 3 min)
-   └── Retrieve storage key → build connection string
-4. Create App Service Plan (plan-autoshutdown, Y1/Dynamic)
-5. Create Application Insights (ai-{functionAppName})
-6. Create Function App
-   └── identity: UserAssigned (the MI from step 2)
-   └── WEBSITE_RUN_FROM_PACKAGE: {SWA_URL}/function-app.zip
-   └── VERSION: current app version (from package.json at build time)
-   └── FUNCTION_APP_RESOURCE_ID: own ARM resource ID (for self-restart)
-   └── All other app settings injected at creation time
-7. Assign Virtual Machine Contributor to MI at subscription scope
-8. Assign Reader to MI at subscription scope
-9. Assign Website Contributor to MI at resource group scope
-   └── Scoped to the RG only — allows MI to restart itself, nothing else
+1. Read resource group location (determines Azure region)
+2. Create Automation Account
+   └── identity: SystemAssigned
+   └── tags: autoshutdown-managed=v4-automation, autoshutdown-version=<RUNBOOK_VERSION>
+   └── Poll until system-assigned identity principalId is available (up to 2 min)
+3. Assign Reader to system-assigned MI at subscription scope
+4. Assign Virtual Machine Contributor to system-assigned MI at subscription scope
+5. Assign Automation Contributor to system-assigned MI at resource group scope
+6. For each runbook (AutoShutdown, AutoStartup):
+   a. Fetch PS1 content from SWA /runbooks/ endpoint
+   b. Compute SHA-256 hash of content
+   c. PUT runbook with publishContentLink (type: PowerShell72)
+   d. POST .../publish
+   e. Poll until state == 'Published' (up to 3 min)
+7. For each runbook, create schedule (every 15 min, aligned to next clock boundary)
+   └── startTime: next :00/:15/:30/:45 boundary at least 6 min in the future
+8. Link each runbook to its schedule with parameters:
+   WhatIf, WindowMinutes, TimeZoneId
 ```
-
-All created resources are tagged `autoshutdown-managed=v3` for uninstall discovery. The Function App is also tagged with `autoshutdown-mi-principal-id` (the MI principal ID) so uninstall can remove the RBAC assignments.
 
 ---
 
@@ -324,39 +304,17 @@ All created resources are tagged `autoshutdown-managed=v3` for uninstall discove
 | View VMs and power state | Reader | Resource Graph — returns only accessible resources |
 | Save schedule / exclude flags | Owner, Contributor, or Virtual Machine Contributor | VM PATCH API — requires `Microsoft.Compute/virtualMachines/write` |
 | Install solution | Owner | ARM resource creation + role assignments |
+| Update runbooks | Owner or Contributor | ARM runbook PUT + Automation Account PATCH |
 | Uninstall solution | Owner | ARM resource deletion + role assignment removal |
 
 Tag Contributor role cannot write VM tags via the VM PATCH API — Azure returns HTTP 403. The app surfaces a user-friendly error message.
 
-### Function App MI permissions (set by installer)
+### Automation Account MI permissions (set by installer)
 
 | Role | Scope | Purpose |
 |---|---|---|
 | Reader | Subscription | Allows Resource Graph to return VMs in this subscription |
-| Virtual Machine Contributor | Subscription | Allows `Stop-AzVM` and `Start-AzVM` |
-| Website Contributor | Resource group (own RG only) | Allows MI to restart itself for self-update |
+| Virtual Machine Contributor | Subscription | Allows deallocate and start REST calls on VMs |
+| Automation Contributor | Resource group (own RG only) | Allows the account to manage its own runbooks (used by updateRunbooks) |
 
-Each MI only has access to its own subscription and its own resource group — no cross-subscription permissions.
-
----
-
-## App Settings Reference (Function App)
-
-| Setting | Set by | Description |
-|---|---|---|
-| `USER_ASSIGNED_MI_CLIENT_ID` | Installer | Client ID of the User-Assigned MI — used for MI authentication |
-| `TIMEZONE` | Installer | Windows timezone ID (e.g. `Central European Standard Time`) |
-| `WHATIF` | Installer (default: `false`) | Set to `true` to log actions without executing them |
-| `WINDOW_MINUTES` | Installer (default: `15`) | Time window width in minutes |
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Installer | Application Insights telemetry |
-| `APPINSIGHTS_INSTRUMENTATIONKEY` | Installer | Application Insights (legacy key, also required) |
-| `AzureWebJobsStorage` | Installer | Storage account connection string (Functions runtime) |
-| `WEBSITE_CONTENTAZUREFILECONNECTIONSTRING` | Installer | Storage account connection string (content share) |
-| `WEBSITE_CONTENTSHARE` | Installer | Storage share name |
-| `FUNCTIONS_EXTENSION_VERSION` | Installer | `~4` |
-| `FUNCTIONS_WORKER_RUNTIME` | Installer | `powershell` |
-| `WEBSITE_RUN_FROM_PACKAGE` | Installer | URL to `function-app.zip` on the Static Web App |
-| `VERSION` | Installer + GitHub Actions | Current version string — compared against `version.json` for self-update |
-| `FUNCTION_APP_RESOURCE_ID` | Installer | Own ARM resource ID — used by self-update to call the restart API |
-| `REPORT_SENDER` | Manual | Shared mailbox address for daily report emails |
-| `REPORT_RECIPIENT` | Manual | Recipient address(es) for daily report emails |
+The system-assigned MI is scoped to a single subscription and its own resource group — no cross-subscription permissions.
