@@ -240,9 +240,10 @@ export async function installAutoShutdown(token, subId, config, onLog) {
 
   // ── Step 4: Schedules + job-schedule links ─────────────────────────────────
   // Snap to the next windowMinutes clock boundary (e.g. :00/:15/:30/:45 for 15 min).
-  // Add 1 min buffer so the schedule is always safely in the future when registered.
+  // Azure Automation requires startTime >= 5 min in the future at schedule creation time.
+  // 6-minute buffer gives enough margin even when install takes 1-2 min to reach this step.
   const interval  = windowMinutes * 60 * 1000
-  const startTime = new Date(Math.ceil((Date.now() + 60_000) / interval) * interval).toISOString()
+  const startTime = new Date(Math.ceil((Date.now() + 6 * 60_000) / interval) * interval).toISOString()
   for (const rb of runbooks) {
     const schedName = `sched-${rb.name}`
     log(`Creating schedule ${schedName} (every ${windowMinutes} min)...`)
