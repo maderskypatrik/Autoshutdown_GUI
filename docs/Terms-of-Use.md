@@ -35,6 +35,7 @@ Once installed, the Automation Account runs two PowerShell runbooks every 15 min
 - **AutoShutdown** — VMs tagged `shutdown = HH:mm` are deallocated at that local time each day
 - **AutoStartup** — VMs tagged `startup = HH:mm` are started at that local time each day
 - VMs tagged `donotshutdown` or `donotstart` are always skipped for the respective action
+- VMs tagged `autoshutdown-weekdays-only` are skipped on Saturday and Sunday — the VM stays deallocated for the entire weekend
 - VMs with no relevant tags are never touched
 
 Shutdown and startup times are evaluated in the timezone configured at install time (default: Central European Standard Time).
@@ -82,6 +83,10 @@ This includes but is not limited to:
 ### 5.2 No guarantee of execution
 
 The Solution operates on a best-effort basis. Factors outside the team's control — including Azure service outages, Automation Account job failures, or Resource Graph indexing delays — may cause a scheduled run to be delayed, skipped, or fail.
+
+The Solution does not verify whether a VM successfully reached its target power state after a scheduled action. A runbook may report success (Azure accepted the request) while the VM remains stuck in a transitional state ("Starting" or "Deallocating") due to an Azure infrastructure issue. Recovery in such cases requires manual intervention via the Azure Portal.
+
+**VM owners are responsible for ensuring that critical VMs are protected by independent monitoring** (e.g. Azure Monitor alerts) so that unexpected unavailability is detected promptly. VMs running workloads where unplanned downtime is unacceptable should not be enrolled in automated shutdown without appropriate safeguards in place.
 
 ### 5.3 No liability for Azure costs
 

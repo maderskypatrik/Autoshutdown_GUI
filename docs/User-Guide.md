@@ -227,6 +227,19 @@ You do not have sufficient permissions. All modifications require **Virtual Mach
 - The runbooks fire every 15 minutes — allow up to 15 minutes after the scheduled time
 - Check the Automation Account Jobs in the Azure Portal for any errors on that run
 
+### VM is stuck in "Starting" or "Deallocating" after a scheduled run
+
+The runbook fires a REST call to start or deallocate the VM and receives `202 Accepted` — Azure handles the actual operation asynchronously. If the VM gets stuck in a transitional state, the runbook has already completed successfully and will not retry until the next scheduled time window.
+
+**Recovery steps:**
+
+1. **Wait up to 15–20 minutes** — Azure will usually force-complete the operation on its own
+2. If still stuck: Azure Portal → VM → click **Stop** to force deallocation, then **Start** again
+3. Check **Boot diagnostics** (left menu on the VM) for errors that may explain why startup failed
+4. If the problem repeats: open an Azure Support ticket for that VM
+
+> **Important for critical VMs:** the automation operates on a best-effort basis and does not monitor whether the VM reached its target state after a scheduled action. For VMs running critical workloads, set up an independent **Azure Monitor alert** (e.g. alert if VM heartbeat stops for more than N minutes) so your team is notified if the VM is unexpectedly unavailable.
+
 ### VM power state in the app does not match the Azure Portal
 
 The app refreshes power state every 30 seconds automatically. If it still shows a stale state, click **Load VMs** to do a full reload.
