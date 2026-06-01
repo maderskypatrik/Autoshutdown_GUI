@@ -51,11 +51,10 @@ export default function UninstallDialog({ token, subId, installation, onClose, o
               <div className="uninstall-info">
                 <p><strong>Resources to be deleted:</strong></p>
                 <ul>
-                  <li>Function App: <strong>{installation.functionAppName}</strong></li>
-                  <li>App Service Plan: plan-autoshutdown</li>
-                  <li>Storage Account (stautoshutdown…)</li>
-                  <li>User-Assigned Managed Identity: mi-autoshutdown</li>
-                  <li>RBAC role assignments (VM Contributor, Reader)</li>
+                  <li>Automation Account: <strong>{installation.functionAppName}</strong></li>
+                  <li>All runbooks and schedules inside the account</li>
+                  <li>System-assigned managed identity (deleted automatically with the account)</li>
+                  <li>RBAC role assignments (VM Contributor, Reader, Automation Contributor)</li>
                 </ul>
                 <p className="uninstall-note">VM tags are not modified. VMs will simply no longer be acted on after removal.</p>
               </div>

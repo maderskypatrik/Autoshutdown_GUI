@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
-import { getSubscriptions, getResourceGroups, getVMs, patchVMTags } from './services/azure'
+import { getSubscriptions, getResourceGroups, getVMs, patchVMTags, refreshVMPowerStates } from './services/azure'
 import { detectInstallation } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
@@ -145,6 +145,21 @@ export default function App() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (vms.length === 0 || !selectedSubId) return
+    const id = setInterval(async () => {
+      try {
+        const token = await getToken()
+        const powerStates = await refreshVMPowerStates(token, selectedSubId)
+        setVms(prev => prev.map(vm => ({
+          ...vm,
+          powerState: powerStates[vm.id.toLowerCase()] ?? vm.powerState,
+        })))
+      } catch {}
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [vms.length, selectedSubId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleEdit = (vmId, field, value) => {
     setEdits(prev => ({ ...prev, [vmId]: { ...prev[vmId], [field]: value } }))
@@ -324,7 +339,7 @@ export default function App() {
           subId={selectedSubId}
           installation={installStatus}
           onClose={() => setShowUninstall(false)}
-          onUninstalled={() => { setShowUninstall(false); refreshInstallStatus() }}
+          onUninstalled={() => { setShowUninstall(false); setInstallStatus({ installed: false }); setVms([]); setEdits({}) }}
         />
       )}
     </div>

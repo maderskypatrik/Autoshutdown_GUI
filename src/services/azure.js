@@ -75,6 +75,20 @@ export async function getVMs(token, subId, rg = null) {
   return all.map(vm => ({ ...vm, powerState: powerStates[vm.id.toLowerCase()] ?? '' }))
 }
 
+export async function refreshVMPowerStates(token, subId) {
+  const powerStates = {}
+  let url = `${ARM}/subscriptions/${subId}/providers/Microsoft.Compute/virtualMachines?statusOnly=true&api-version=2024-03-01`
+  while (url) {
+    const resp = await armFetch(token, url)
+    for (const vm of resp.value ?? []) {
+      const s = (vm.properties?.instanceView?.statuses ?? []).find(s => s.code?.startsWith('PowerState/'))
+      if (s) powerStates[vm.id.toLowerCase()] = s.displayStatus
+    }
+    url = resp.nextLink ?? null
+  }
+  return powerStates
+}
+
 // Updates VM tags via the VM PATCH API, which requires Microsoft.Compute/virtualMachines/write.
 // Azure enforces the permission — Tag Contributor and below receive a 403.
 export async function patchVMTags(token, resourceId, tags) {
