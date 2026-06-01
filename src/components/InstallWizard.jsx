@@ -90,8 +90,7 @@ export default function InstallWizard({ token, subId, resourceGroups, onClose, o
               <div className="tou-box">
                 <p><strong>What will be installed:</strong></p>
                 <ul>
-                  <li>User-Assigned Managed Identity</li>
-                  <li>Azure Automation Account with PowerShell runbooks (runs every 15 minutes)</li>
+                  <li>Azure Automation Account with system-assigned managed identity and PowerShell runbooks (runs every 15 minutes)</li>
                 </ul>
                 <p><strong>Permissions granted to the Automation Account:</strong></p>
                 <ul>

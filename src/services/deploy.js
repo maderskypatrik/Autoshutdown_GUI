@@ -26,10 +26,9 @@ const MI_PRINCIPAL_TAG = 'autoshutdown-mi-principal-id'
 
 const ROLE_VM_CONTRIBUTOR         = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
 const ROLE_READER                 = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
-const ROLE_AUTOMATION_CONTRIBUTOR = 'f353d9bd-d4a6-484e-a77a-8050b599b867' // self-update
+const ROLE_AUTOMATION_CONTRIBUTOR = 'f353d9bd-d4a6-484e-a77a-8050b599b867'
 
 const AA_API   = '2023-11-01'
-const MI_API   = '2023-01-31'
 const AUTH_API = '2022-04-01'
 const RG_API   = '2022-10-01'
 
@@ -114,7 +113,7 @@ export async function detectInstallation(token, subId) {
 | where subscriptionId =~ '${subId}'
 | where type =~ 'microsoft.automation/automationaccounts'
 | where tags['${MANAGED_TAG_KEY}'] =~ '${MANAGED_TAG_VAL}'
-| project id, name, resourceGroup, location, tags`,
+| project id, name, resourceGroup, location, tags, identity`,
         subscriptions: [subId],
       }),
     }
@@ -128,7 +127,7 @@ export async function detectInstallation(token, subId) {
     automationAccountName: aa.name,
     resourceGroup:         aa.resourceGroup,
     location:              aa.location,
-    miPrincipalId:         aa.tags?.[MI_PRINCIPAL_TAG] ?? null,
+    miPrincipalId:         aa.identity?.principalId ?? aa.tags?.[MI_PRINCIPAL_TAG] ?? null,
   }
 }
 
@@ -146,14 +145,13 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   } = config
 
   const automationAccountName = functionAppName || 'aa-autoshutdown'
-  const miName = 'mi-autoshutdown'
   const managedTags = { [MANAGED_TAG_KEY]: MANAGED_TAG_VAL }
 
   // Runbook content is served from this app's own origin.
   const runbookBaseUrl =
     (typeof window !== 'undefined' ? window.location.origin : '') + '/runbooks'
 
-  // Resolve the RG location so the account/identity land in the right region.
+  // Resolve the RG location so the account lands in the right region.
   log('Reading resource group location...')
   const rg = await armFetch(
     token,
@@ -163,21 +161,26 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   if (!location) throw new Error(`Could not resolve location for resource group ${resourceGroup}.`)
   log(`Location: ${location}`)
 
-  // ── Step 1: User-Assigned Managed Identity (poll principalId before use) ────
-  log('Creating User-Assigned Managed Identity...')
-  const miUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${miName}?api-version=${MI_API}`
-  await armFetch(token, miUrl, { method: 'PUT', body: JSON.stringify({ location, tags: managedTags }) })
-  const miData = await poll(async () => {
+  // ── Step 1: Automation Account with system-assigned managed identity ────────
+  log(`Creating Automation Account: ${automationAccountName}...`)
+  const aaUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}?api-version=${AA_API}`
+  await armFetch(token, aaUrl, {
+    method: 'PUT',
+    body: JSON.stringify({
+      location,
+      tags: managedTags,
+      identity: { type: 'SystemAssigned' },
+      properties: { sku: { name: 'Basic' }, publicNetworkAccess: true },
+    }),
+  })
+  const aa = await poll(async () => {
     try {
-      const mi = await armFetch(token, miUrl)
-      return (mi?.properties?.principalId && mi?.properties?.clientId) ? mi : null
+      const r = await armFetch(token, aaUrl)
+      return r?.identity?.principalId ? r : null
     } catch { return null }
-  }, { intervalMs: 5000, timeoutMs: 180000, label: 'managed identity principalId' })
-  const miResourceId  = miData.id
-  const miClientId    = miData.properties.clientId
-  const miPrincipalId = miData.properties.principalId
-  if (!miPrincipalId) throw new Error('Managed Identity principalId did not populate; aborting before role assignment.')
-  log(`Managed Identity created (principal: ${miPrincipalId})`, 'success')
+  }, { intervalMs: 5000, timeoutMs: 120000, label: 'Automation account system-assigned identity' })
+  const miPrincipalId = aa.identity.principalId
+  log(`Automation Account created (principal: ${miPrincipalId}).`, 'success')
 
   // ── Step 2: RBAC ───────────────────────────────────────────────────────────
   log('Assigning Reader role (subscription scope)...')
@@ -186,36 +189,9 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   log('Assigning Virtual Machine Contributor role (subscription scope)...')
   await assignRole(token, subId, `/subscriptions/${subId}`, miPrincipalId, ROLE_VM_CONTRIBUTOR)
   log('VM Contributor role assigned.', 'success')
-  log('Assigning Automation Contributor role (resource group scope, for self-update)...')
+  log('Assigning Automation Contributor role (resource group scope)...')
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_AUTOMATION_CONTRIBUTOR)
   log('Automation Contributor role assigned.', 'success')
-
-  // ── Step 3: Automation Account (UAMI attached, identity verified) ──────────
-  log(`Creating Automation Account: ${automationAccountName}...`)
-  const aaUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}?api-version=${AA_API}`
-  await armFetch(token, aaUrl, {
-    method: 'PUT',
-    body: JSON.stringify({
-      location,
-      tags: { ...managedTags, [MI_PRINCIPAL_TAG]: miPrincipalId },
-      identity: { type: 'UserAssigned', userAssignedIdentities: { [miResourceId]: {} } },
-      properties: { sku: { name: 'Basic' }, publicNetworkAccess: true },
-    }),
-  })
-  const aa = await poll(async () => {
-    try {
-      const r = await armFetch(token, aaUrl)
-      return r?.properties?.state ? r : null
-    } catch { return null }
-  }, { intervalMs: 5000, timeoutMs: 120000, label: 'Automation account' })
-  const attached = Object.values(aa?.identity?.userAssignedIdentities ?? {})[0]
-  if (!attached?.principalId || attached.principalId.toLowerCase() !== miPrincipalId.toLowerCase()) {
-    throw new Error(
-      `Identity mismatch: roles assigned to ${miPrincipalId}, but the account runs as ${attached?.principalId}. ` +
-      `Uninstall, ensure no stale '${miName}' identity/assignments remain, and reinstall.`
-    )
-  }
-  log('Automation Account created and identity verified.', 'success')
 
   // ── Step 4: Import Az modules ─────────────────────────────────────────────
   // Az.Accounts and Az.Compute are usually preinstalled in the PS 7.2 runtime
@@ -318,7 +294,6 @@ export async function installAutoShutdown(token, subId, config, onLog) {
               WhatIf:        String(whatIf),
               WindowMinutes: String(windowMinutes),
               TimeZoneId:    timezone,
-              ClientId:      miClientId,
             },
           },
         }),
@@ -328,7 +303,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   }
 
   log('Installation complete!', 'success')
-  return { automationAccountName, functionAppName: automationAccountName, resourceGroup, miPrincipalId, miName }
+  return { automationAccountName, functionAppName: automationAccountName, resourceGroup, miPrincipalId }
 }
 
 // ── uninstallAutoShutdown ──────────────────────────────────────────────────────
@@ -337,38 +312,26 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
   const log = (msg, level = 'info') => onLog({ msg, level })
   const resourceGroup = installation.resourceGroup
   const automationAccountName = installation.automationAccountName || installation.functionAppName
-  const miName = installation.miName || 'mi-autoshutdown'
   const miPrincipalId = installation.miPrincipalId
 
   log('Removing RBAC role assignments...')
-  const principals = new Set()
-  if (miPrincipalId) principals.add(miPrincipalId.toLowerCase())
-  try {
-    const miList = await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities?api-version=${MI_API}`
-    )
-    for (const mi of miList?.value ?? []) {
-      if (mi?.name === miName && mi?.properties?.principalId) principals.add(mi.properties.principalId.toLowerCase())
-    }
-  } catch {}
-  for (const pid of principals) {
+  if (miPrincipalId) {
     try {
       const ra = await armFetch(
         token,
-        `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments?api-version=${AUTH_API}&$filter=principalId eq '${pid}'`
+        `${ARM}/subscriptions/${subId}/providers/Microsoft.Authorization/roleAssignments?api-version=${AUTH_API}&$filter=principalId eq '${miPrincipalId}'`
       )
       for (const a of ra?.value ?? []) {
         await armFetch(token, `${ARM}${a.id}?api-version=${AUTH_API}`, { method: 'DELETE' })
         log(`  Removed: ${a.id.split('/').at(-1)}`)
       }
     } catch (e) {
-      log(`  Warning: could not fully remove assignments for ${pid}: ${e.message}`, 'warn')
+      log(`  Warning: could not fully remove assignments for ${miPrincipalId}: ${e.message}`, 'warn')
     }
   }
   log('Role assignments removed.', 'success')
 
-  log('Deleting Automation Account...')
+  log('Deleting Automation Account (system-assigned identity deleted automatically)...')
   try {
     await armFetch(
       token,
@@ -376,16 +339,6 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
       { method: 'DELETE' }
     )
     log('Automation Account deleted.', 'success')
-  } catch (e) { log(`  Warning: ${e.message}`, 'warn') }
-
-  log('Deleting Managed Identity...')
-  try {
-    await armFetch(
-      token,
-      `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${miName}?api-version=${MI_API}`,
-      { method: 'DELETE' }
-    )
-    log('Managed Identity deleted.', 'success')
   } catch (e) { log(`  Warning: ${e.message}`, 'warn') }
 
   log('Uninstall complete.', 'success')
