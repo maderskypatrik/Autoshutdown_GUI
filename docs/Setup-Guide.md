@@ -267,6 +267,7 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 | Edit time | User types a time in `HH:mm` format — change is tracked locally, not saved yet |
 | Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
 | Save Changes | For each modified VM, app calls the Azure VM PATCH API to update the tag set. If a shutdown or startup time is set, `autoshutdown-enrolled` is added automatically. If both times are cleared, it is removed. |
+| Check "Weekdays only" | Marks the VM with `autoshutdown-weekdays-only` tag. The runbooks will skip shutdown and startup on Saturday and Sunday — VM stays deallocated for the whole weekend automatically |
 | Auto-refresh | Every 30 seconds while the VM table is visible, the app polls the ARM `statusOnly` endpoint and updates power state in place — no full reload needed |
 | Automation | Every 15 minutes, the Automation Account runbooks query Resource Graph for VMs that have both `autoshutdown-enrolled` and `shutdown`/`startup` tags, then act on those in the current time window |
 | Return later | App always reads current tag values from Azure — it is stateless |

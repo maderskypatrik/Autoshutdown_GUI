@@ -100,6 +100,26 @@ Saving a schedule automatically enrolls the VM into the automation. Clearing bot
 
 ---
 
+## Weekdays Only (Mon–Fri)
+
+Checking the **Weekdays only** checkbox tells the automation to skip shutdown and startup on Saturday and Sunday — the VM stays off for the entire weekend without any manual action.
+
+**Example:** shutdown `18:00`, startup `07:00`, Weekdays only checked:
+
+| Day | What happens |
+|---|---|
+| Monday – Thursday | VM starts at 07:00, shuts down at 18:00 as normal |
+| Friday 18:00 | Automation shuts the VM down |
+| Saturday 07:00 | Automation sees "weekdays only" + today is Saturday → skips startup |
+| Sunday 07:00 | Same — skips startup |
+| Monday 07:00 | Automation starts the VM normally |
+
+The VM stays deallocated all weekend — compute cost drops to zero. Only the OS disk continues to bill.
+
+> This option only makes sense when a startup time is set. If you have no startup time configured, the VM will not start on any day regardless of this setting.
+
+---
+
 ## Excluding a VM
 
 If a VM should never be shut down or started by the automation regardless of any time set:
