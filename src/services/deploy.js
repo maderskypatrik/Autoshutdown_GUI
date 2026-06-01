@@ -205,7 +205,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   ]
   for (const m of modules) {
     log(`Importing module ${m.name}${m.required ? '' : ' (best-effort)'}...`)
-    const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/modules/${m.name}?api-version=${AA_API}`
+    const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/powerShell72Modules/${m.name}?api-version=${AA_API}`
     try {
       await armFetch(token, modUrl, { method: 'PUT', body: JSON.stringify({ properties: { contentLink: { uri: m.uri } } }) })
       await poll(async () => {
