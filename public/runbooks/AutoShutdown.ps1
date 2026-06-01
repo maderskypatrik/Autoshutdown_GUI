@@ -105,12 +105,21 @@ Resources
     )
 "@
 
+$armToken = [System.Net.NetworkCredential]::new('', (Get-AzAccessToken -ResourceUrl 'https://management.azure.com').Token).Password
+$subIds   = @(Get-AzSubscription -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+$graphUri = 'https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01'
+
 $allTaggedVMs = [System.Collections.Generic.List[object]]::new()
-$result = Search-AzGraph -Query $query -First 1000 -ErrorAction Stop
-$allTaggedVMs.AddRange([object[]]@($result))
-while ($result.SkipToken) {
-    $result = Search-AzGraph -Query $query -First 1000 -SkipToken $result.SkipToken -ErrorAction Stop
-    $allTaggedVMs.AddRange([object[]]@($result))
+for ($i = 0; $i -lt $subIds.Count; $i += 1000) {
+    $batch  = @($subIds[$i..([Math]::Min($i + 999, $subIds.Count - 1))])
+    $body   = @{ query = $query; subscriptions = $batch; options = @{ '$top' = 1000 } } | ConvertTo-Json -Depth 5
+    $result = Invoke-RestMethod -Uri $graphUri -Method POST -Headers @{ Authorization = "Bearer $armToken" } -Body $body -ContentType 'application/json' -ErrorAction Stop
+    if ($result.data) { $allTaggedVMs.AddRange([object[]]($result.data)) }
+    while ($result.skipToken) {
+        $body   = @{ query = $query; subscriptions = $batch; options = @{ '$top' = 1000; '$skipToken' = $result.skipToken } } | ConvertTo-Json -Depth 5
+        $result = Invoke-RestMethod -Uri $graphUri -Method POST -Headers @{ Authorization = "Bearer $armToken" } -Body $body -ContentType 'application/json' -ErrorAction Stop
+        if ($result.data) { $allTaggedVMs.AddRange([object[]]($result.data)) }
+    }
 }
 
 Write-Log "Resource Graph: $($allTaggedVMs.Count) VM(s) have a 'shutdown' tag across all subscriptions."

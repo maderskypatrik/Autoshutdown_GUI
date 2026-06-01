@@ -193,36 +193,9 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   await assignRole(token, subId, `/subscriptions/${subId}/resourceGroups/${resourceGroup}`, miPrincipalId, ROLE_AUTOMATION_CONTRIBUTOR)
   log('Automation Contributor role assigned.', 'success')
 
-  // ── Step 4: Import Az modules ─────────────────────────────────────────────
-  // Az.Accounts and Az.Compute are usually preinstalled in the PS 7.2 runtime
-  // and are imported best-effort. Az.ResourceGraph is NOT preinstalled and is
-  // required — Search-AzGraph will fail at runtime without it. We block until
-  // it is confirmed Succeeded before publishing runbooks.
-  // Az.Accounts and Az.Compute are built into the PS 7.2 sandbox runtime —
-  // re-importing them via powerShell72Modules causes assembly load context
-  // conflicts. Only Az.ResourceGraph needs explicit import.
-  const modules = [
-    { name: 'Az.ResourceGraph', uri: 'https://www.powershellgallery.com/api/v2/package/Az.ResourceGraph', required: true },
-  ]
-  for (const m of modules) {
-    log(`Importing module ${m.name}${m.required ? '' : ' (best-effort)'}...`)
-    const modUrl = `${ARM}/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${automationAccountName}/powerShell72Modules/${m.name}?api-version=${AA_API}`
-    try {
-      await armFetch(token, modUrl, { method: 'PUT', body: JSON.stringify({ properties: { contentLink: { uri: m.uri } } }) })
-      await poll(async () => {
-        const r = await armFetch(token, modUrl)
-        const s = r?.properties?.provisioningState
-        if (s === 'Failed') throw new Error(`Module ${m.name} import Failed.`)
-        return s === 'Succeeded' ? r : null
-      }, { intervalMs: 10000, timeoutMs: 600000, label: `module ${m.name}` })
-      log(`Module ${m.name} ready.`, 'success')
-    } catch (e) {
-      if (m.required) throw new Error(`Required module ${m.name} failed to import: ${e.message}`)
-      log(`Module ${m.name} skipped (runtime likely provides it): ${e.message}`, 'warn')
-    }
-  }
-
-  // ── Step 5: Create + publish runbooks (content fetched from SWA origin) ────
+  // ── Step 3: Create + publish runbooks (content fetched from SWA origin) ────
+  // No module imports needed — runbooks use Invoke-RestMethod for Resource Graph
+  // queries; Az.Accounts and Az.Compute are built into the PS 7.2 runtime.
   const runbooks = [
     { name: 'AutoShutdown', file: 'AutoShutdown.ps1' },
     { name: 'AutoStartup',  file: 'AutoStartup.ps1'  },
@@ -265,7 +238,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     log(`Runbook ${rb.name} published.`, 'success')
   }
 
-  // ── Step 6: Schedules + job-schedule links ─────────────────────────────────
+  // ── Step 4: Schedules + job-schedule links ─────────────────────────────────
   const startTime = new Date(Date.now() + 10 * 60 * 1000).toISOString()
   for (const rb of runbooks) {
     const schedName = `sched-${rb.name}`
