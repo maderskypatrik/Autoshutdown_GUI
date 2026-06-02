@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
@@ -60,23 +60,49 @@ export default function App() {
 
   // null = no sub selected, 'checking', { installed: false }, { installed: true, ...details }
   const [installStatus,    setInstallStatus]    = useState(null)
-  const [showInstallWizard, setShowInstallWizard] = useState(false)
-  const [showUninstall,     setShowUninstall]     = useState(false)
-  const [showUpdate,        setShowUpdate]        = useState(false)
-  const [cachedToken,       setCachedToken]       = useState(null)
+  const [showInstallWizard,    setShowInstallWizard]    = useState(false)
+  const [showUninstall,        setShowUninstall]        = useState(false)
+  const [showUpdate,           setShowUpdate]           = useState(false)
+  const [cachedToken,          setCachedToken]          = useState(null)
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false)
+
+  const lastActivityRef = useRef(Date.now())
 
   const getToken = useCallback(async () => {
     try {
       const r = await instance.acquireTokenSilent({ scopes: armScopes, account: accounts[0] })
       return r.accessToken
     } catch (e) {
-      if (e instanceof InteractionRequiredAuthError) {
+      if (e instanceof InteractionRequiredAuthError || e.errorCode === 'monitor_window_timeout') {
         const r = await instance.acquireTokenPopup({ scopes: armScopes })
         return r.accessToken
       }
       throw e
     }
   }, [instance, accounts])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const update = () => { lastActivityRef.current = Date.now() }
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']
+    events.forEach(ev => window.addEventListener(ev, update, { passive: true }))
+    return () => events.forEach(ev => window.removeEventListener(ev, update))
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const id = setInterval(() => {
+      const idle = Date.now() - lastActivityRef.current
+      if (idle >= 60 * 60 * 1000) {
+        instance.logoutRedirect()
+      } else if (idle >= 55 * 60 * 1000) {
+        setShowInactivityWarning(true)
+      } else {
+        setShowInactivityWarning(false)
+      }
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [isAuthenticated, instance])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -361,6 +387,29 @@ export default function App() {
           onClose={() => setShowUpdate(false)}
           onUpdated={() => { setShowUpdate(false); setInstallStatus(prev => ({ ...prev, version: RUNBOOK_VERSION })) }}
         />
+      )}
+
+      {showInactivityWarning && (
+        <div className="modal-overlay">
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <span className="modal-title">Session expiring</span>
+            </div>
+            <div className="modal-body">
+              <p className="wizard-intro">
+                You have been inactive for 55 minutes. You will be signed out automatically in 5 minutes.
+              </p>
+              <div className="modal-footer">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => { lastActivityRef.current = Date.now(); setShowInactivityWarning(false) }}
+                >
+                  Stay signed in
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
