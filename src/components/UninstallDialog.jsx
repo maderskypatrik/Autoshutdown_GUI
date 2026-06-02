@@ -55,6 +55,7 @@ export default function UninstallDialog({ token, subId, installation, onClose, o
                   <li>All runbooks and schedules inside the account</li>
                   <li>System-assigned managed identity (deleted automatically with the account)</li>
                   <li>RBAC role assignments (VM Contributor, Reader, Automation Contributor)</li>
+                  <li>Failure alert rule and action group (if configured at install time)</li>
                 </ul>
                 <p className="uninstall-note">VM tags are not modified. VMs will simply no longer be acted on after removal.</p>
               </div>

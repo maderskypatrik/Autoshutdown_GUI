@@ -34,9 +34,11 @@ const ROLE_VM_CONTRIBUTOR         = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
 const ROLE_READER                 = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
 const ROLE_AUTOMATION_CONTRIBUTOR = 'f353d9bd-d4a6-484e-a77a-8050b599b867'
 
-const AA_API   = '2023-11-01'
-const AUTH_API = '2022-04-01'
-const RG_API   = '2022-10-01'
+const AA_API     = '2023-11-01'
+const AUTH_API   = '2022-04-01'
+const RG_API     = '2022-10-01'
+const MONITOR_API = '2023-01-01'
+const METRIC_API  = '2018-03-01'
 
 // ── shared helpers ───────────────────────────────────────────────────────────
 
@@ -97,6 +99,85 @@ async function assignRole(token, subId, scope, principalId, roleDefId) {
   }
 }
 
+// ── alert helpers ────────────────────────────────────────────────────────────────
+
+async function createAlertResources(token, subId, rg, location, aaResourceId, aaName, emails) {
+  const agName    = `ag-${aaName}`
+  const alertName = `alert-${aaName}-failed`
+
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${rg}/providers/microsoft.insights/actionGroups/${agName}?api-version=${MONITOR_API}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location: 'Global',
+        properties: {
+          groupShortName: 'autoshutdown',
+          enabled: true,
+          emailReceivers: emails.map((email, i) => ({
+            name: `recipient-${i}`,
+            emailAddress: email,
+            useCommonAlertSchema: true,
+          })),
+        },
+      }),
+    }
+  )
+
+  const agResourceId = `/subscriptions/${subId}/resourceGroups/${rg}/providers/microsoft.insights/actionGroups/${agName}`
+
+  await armFetch(
+    token,
+    `${ARM}/subscriptions/${subId}/resourceGroups/${rg}/providers/microsoft.insights/metricAlerts/${alertName}?api-version=${METRIC_API}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        location: 'global',
+        properties: {
+          description: 'Fires when an AutoShutdown or AutoStartup runbook job fails',
+          severity: 2,
+          enabled: true,
+          scopes: [aaResourceId],
+          evaluationFrequency: 'PT15M',
+          windowSize: 'PT15M',
+          criteria: {
+            'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria',
+            allOf: [{
+              name: 'FailedJobs',
+              metricName: 'TotalJob',
+              dimensions: [{ name: 'Status', operator: 'Include', values: ['Failed'] }],
+              operator: 'GreaterThan',
+              threshold: 0,
+              timeAggregation: 'Total',
+              criterionType: 'StaticThresholdCriterion',
+            }],
+          },
+          actions: [{ actionGroupId: agResourceId }],
+        },
+      }),
+    }
+  )
+}
+
+async function deleteAlertResources(token, subId, rg, aaName) {
+  const resources = [
+    { type: 'microsoft.insights/actionGroups', name: `ag-${aaName}`,           api: MONITOR_API },
+    { type: 'microsoft.insights/metricAlerts', name: `alert-${aaName}-failed`, api: METRIC_API  },
+  ]
+  for (const r of resources) {
+    try {
+      await armFetch(
+        token,
+        `${ARM}/subscriptions/${subId}/resourceGroups/${rg}/providers/${r.type}/${r.name}?api-version=${r.api}`,
+        { method: 'DELETE' }
+      )
+    } catch (e) {
+      if (!/404|NotFound|ResourceNotFound/i.test(e.message)) throw e
+    }
+  }
+}
+
 // ── detectInstallation ─────────────────────────────────────────────────────────
 // Drives the "installed" banner and feeds uninstall. Now looks for the Automation
 // account (tagged managed) rather than a Function App. Returns the same field
@@ -145,6 +226,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     windowMinutes = 15,
     subscriptionName = subId,
     installedBy = '',
+    notificationEmails = [],
   } = config
 
   const automationAccountName = functionAppName || 'aa-autoshutdown'
@@ -270,6 +352,16 @@ export async function installAutoShutdown(token, subId, config, onLog) {
     log(`${rb.name} scheduled.`, 'success')
   }
 
+  if (notificationEmails.length > 0) {
+    log(`Setting up failure notifications for ${notificationEmails.length} recipient(s)...`)
+    try {
+      await createAlertResources(token, subId, resourceGroup, location, aa.id, automationAccountName, notificationEmails)
+      log(`Failure alerts configured (${notificationEmails.join(', ')}).`, 'success')
+    } catch (e) {
+      log(`Warning: could not create alert resources: ${e.message}`, 'warn')
+    }
+  }
+
   log('Installation complete!', 'success')
 
   try {
@@ -366,6 +458,14 @@ export async function uninstallAutoShutdown(token, subId, installation, onLog) {
     }
   }
   log('Role assignments removed.', 'success')
+
+  log('Removing failure alert and action group (if configured)...')
+  try {
+    await deleteAlertResources(token, subId, resourceGroup, automationAccountName)
+    log('Alert resources removed.', 'success')
+  } catch (e) {
+    log(`Warning: could not remove alert resources: ${e.message}`, 'warn')
+  }
 
   log('Deleting Automation Account (system-assigned identity deleted automatically)...')
   try {

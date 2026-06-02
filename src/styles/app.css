@@ -471,7 +471,8 @@ body {
   color: var(--gray-800);
 }
 .wizard-input:focus { outline: 2px solid var(--blue-light); border-color: var(--blue); }
-.wizard-hint    { font-size: 11px; color: var(--gray-400); }
+.wizard-hint     { font-size: 11px; color: var(--gray-400); }
+.wizard-optional { font-size: 11px; color: var(--gray-400); font-weight: 400; }
 
 /* ── Install progress log ───────────────────────────────────── */
 .install-log {

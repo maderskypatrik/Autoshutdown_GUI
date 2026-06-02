@@ -24,6 +24,7 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
   const [rg, setRg]                   = useState(resourceGroups[0]?.name ?? '')
   const [funcName, setFuncName]       = useState('aa-autoshutdown')
   const [timezone, setTimezone]       = useState('Central European Standard Time')
+  const [notifEmails, setNotifEmails] = useState('')
   const [running, setRunning]         = useState(false)
   const [done, setDone]               = useState(false)
   const [failed, setFailed]           = useState(false)
@@ -45,7 +46,8 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
     setFailed(false)
     setLog([])
     try {
-      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone, subscriptionName, installedBy }, appendLog)
+      const notificationEmails = notifEmails.split(',').map(e => e.trim()).filter(Boolean)
+      await installAutoShutdown(token, subId, { resourceGroup: rg, functionAppName: funcName, timezone, subscriptionName, installedBy, notificationEmails }, appendLog)
       setDone(true)
     } catch (e) {
       appendLog({ msg: `Installation failed: ${e.message}`, level: 'error' })
@@ -150,6 +152,17 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
                       <option key={tz} value={tz}>{tz}</option>
                     ))}
                   </select>
+                </div>
+
+                <div className="wizard-field">
+                  <label className="label">Failure notification emails <span className="wizard-optional">(optional)</span></label>
+                  <input
+                    className="wizard-input"
+                    value={notifEmails}
+                    onChange={e => setNotifEmails(e.target.value)}
+                    placeholder="user@example.com, other@example.com"
+                  />
+                  <span className="wizard-hint">Separate multiple addresses with a comma. Leave empty to skip alerts.</span>
                 </div>
               </div>
 
