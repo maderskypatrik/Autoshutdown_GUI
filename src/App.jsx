@@ -3,7 +3,7 @@ import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import { InteractionRequiredAuthError } from '@azure/msal-browser'
 import { armScopes } from './authConfig'
 import { getSubscriptions, getResourceGroups, getVMs, patchVMTags, refreshVMPowerStates } from './services/azure'
-import { detectInstallation, RUNBOOK_VERSION } from './services/deploy'
+import { detectInstallation, updateAlertEmails, RUNBOOK_VERSION } from './services/deploy'
 import LoginPage from './components/LoginPage'
 import Header from './components/Header'
 import Controls from './components/Controls'
@@ -151,6 +151,12 @@ export default function App() {
       const installation = await detectInstallation(token, selectedSubId)
       setInstallStatus(installation ? { installed: true, ...installation } : { installed: false })
     } catch {}
+  }
+
+  const handleSaveEmails = async (emails) => {
+    const token = await getToken()
+    await updateAlertEmails(token, selectedSubId, installStatus, emails)
+    setInstallStatus(prev => ({ ...prev, notificationEmails: emails }))
   }
 
   const handleLoadVMs = async () => {
@@ -303,6 +309,7 @@ export default function App() {
           onInstall={() => setShowInstallWizard(true)}
           onUninstall={() => setShowUninstall(true)}
           onUpdate={() => setShowUpdate(true)}
+          onSaveEmails={handleSaveEmails}
         />
 
         {error && <div className="banner banner-error">{error}</div>}

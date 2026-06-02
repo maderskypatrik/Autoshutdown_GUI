@@ -202,14 +202,25 @@ export async function detectInstallation(token, subId) {
   const items = data?.data ?? []
   if (items.length === 0) return null
   const aa = items[0]
+
+  let notificationEmails = []
+  try {
+    const ag = await armFetch(
+      token,
+      `${ARM}/subscriptions/${subId}/resourceGroups/${aa.resourceGroup}/providers/microsoft.insights/actionGroups/ag-${aa.name}?api-version=${MONITOR_API}`
+    )
+    notificationEmails = (ag?.properties?.emailReceivers ?? []).map(r => r.emailAddress)
+  } catch {}
+
   return {
-    functionAppId:         aa.id,        // kept for UI compatibility
-    functionAppName:       aa.name,      // banner reads this; shows the account name
+    functionAppId:         aa.id,
+    functionAppName:       aa.name,
     automationAccountName: aa.name,
     resourceGroup:         aa.resourceGroup,
     location:              aa.location,
     miPrincipalId:         aa.identity?.principalId ?? aa.tags?.[MI_PRINCIPAL_TAG] ?? null,
     version:               aa.tags?.[MANAGED_TAG_VERSION] ?? null,
+    notificationEmails,
   }
 }
 
@@ -432,6 +443,17 @@ export async function updateRunbooks(token, subId, installation, onLog) {
     }
   )
   log('Update complete!', 'success')
+}
+
+// ── updateAlertEmails ──────────────────────────────────────────────────────────
+
+export async function updateAlertEmails(token, subId, installation, emails) {
+  const { resourceGroup, automationAccountName, functionAppId, location } = installation
+  if (emails.length === 0) {
+    await deleteAlertResources(token, subId, resourceGroup, automationAccountName)
+  } else {
+    await createAlertResources(token, subId, resourceGroup, location, functionAppId, automationAccountName, emails)
+  }
 }
 
 // ── uninstallAutoShutdown ──────────────────────────────────────────────────────
