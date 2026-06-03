@@ -101,7 +101,7 @@ async function assignRole(token, subId, scope, principalId, roleDefId) {
 
 // ── alert helpers ────────────────────────────────────────────────────────────────
 
-async function createAlertResources(token, subId, rg, location, aaResourceId, aaName, emails) {
+async function createAlertResources(token, subId, rg, location, aaResourceId, aaName, emails, subscriptionName = '') {
   const agName    = `ag-${aaName}`
   const alertName = `alert-${aaName}-failed`
 
@@ -135,7 +135,7 @@ async function createAlertResources(token, subId, rg, location, aaResourceId, aa
       body: JSON.stringify({
         location: 'global',
         properties: {
-          description: 'Fires when an AutoShutdown or AutoStartup runbook job fails',
+          description: `A runbook job failed in the AutoShutdown solution.\n\nSubscription: ${subscriptionName || subId}\nAutomation Account: ${aaName}\nResource Group: ${rg}\n\nTo investigate, open the Azure Portal and go to:\nAutomation Accounts → ${aaName} → Jobs\n\nLook for the most recent Failed job and check its output for the error details.`,
           severity: 2,
           enabled: true,
           scopes: [aaResourceId],
@@ -366,7 +366,7 @@ export async function installAutoShutdown(token, subId, config, onLog) {
   if (notificationEmails.length > 0) {
     log(`Setting up failure notifications for ${notificationEmails.length} recipient(s)...`)
     try {
-      await createAlertResources(token, subId, resourceGroup, location, aa.id, automationAccountName, notificationEmails)
+      await createAlertResources(token, subId, resourceGroup, location, aa.id, automationAccountName, notificationEmails, subscriptionName)
       log(`Failure alerts configured (${notificationEmails.join(', ')}).`, 'success')
     } catch (e) {
       log(`Warning: could not create alert resources: ${e.message}`, 'warn')
@@ -448,11 +448,11 @@ export async function updateRunbooks(token, subId, installation, onLog) {
 // ── updateAlertEmails ──────────────────────────────────────────────────────────
 
 export async function updateAlertEmails(token, subId, installation, emails) {
-  const { resourceGroup, automationAccountName, functionAppId, location } = installation
+  const { resourceGroup, automationAccountName, functionAppId, location, subscriptionName } = installation
   if (emails.length === 0) {
     await deleteAlertResources(token, subId, resourceGroup, automationAccountName)
   } else {
-    await createAlertResources(token, subId, resourceGroup, location, functionAppId, automationAccountName, emails)
+    await createAlertResources(token, subId, resourceGroup, location, functionAppId, automationAccountName, emails, subscriptionName)
   }
 }
 

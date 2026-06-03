@@ -135,7 +135,8 @@ export default function App() {
         detectInstallation(token, subId),
       ])
       setResourceGroups(rgs.sort((a, b) => a.name.localeCompare(b.name)))
-      setInstallStatus(installation ? { installed: true, ...installation } : { installed: false })
+      const subName = subscriptions.find(s => s.subscriptionId === subId)?.displayName ?? subId
+      setInstallStatus(installation ? { installed: true, ...installation, subscriptionName: subName } : { installed: false })
     } catch (e) {
       setError(`Failed to load subscription data: ${e.message}`)
       setInstallStatus(null)
