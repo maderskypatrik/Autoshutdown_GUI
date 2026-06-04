@@ -94,7 +94,7 @@ All application state lives in `App.jsx`. No external state library. Key state:
 | `resourceGroups` | RGs in the selected subscription |
 | `selectedRg` | Currently selected RG (empty = all) |
 | `vms` | VM list (tags from Resource Graph, power state from ARM statusOnly) |
-| `edits` | Map of `vmId → { shutdown, startup, noShutdown, noStart }` — local unsaved changes |
+| `edits` | Map of `vmId → { shutdown, startup, weekdaysOnly }` — local unsaved changes |
 | `installStatus` | `null / 'checking' / { installed: false } / { installed: true, ...details }` |
 
 `edits` is initialised from `vms` when VMs load and re-synced after a successful save. A 30-second interval updates only `powerState` on each VM while the table is visible, without touching tags or edits.
@@ -168,8 +168,6 @@ All scheduling data is stored as Azure tags on the VM. No other data store.
 | `shutdown` | `HH:mm` (e.g. `18:30`) | Daily shutdown time in configured timezone |
 | `startup` | `HH:mm` (e.g. `07:00`) | Daily startup time in configured timezone |
 | `autoshutdown-enrolled` | any (e.g. `true`) | Marks VM as managed — runbooks ignore VMs without this tag |
-| `donotshutdown` | any | Prevents automatic shutdown regardless of `shutdown` tag |
-| `donotstart` | any | Prevents automatic startup regardless of `startup` tag |
 | `autoshutdown-weekdays-only` | any (e.g. `true`) | Skips shutdown and startup on Saturday and Sunday |
 
 **Implicit enrollment:** The UI sets `autoshutdown-enrolled` automatically when a schedule is saved (if either `shutdown` or `startup` is set) and removes it when both are cleared.
@@ -200,8 +198,7 @@ All scheduling data is stored as Azure tags on the VM. No other data store.
 1. Acquires ARM token via system-assigned managed identity (`Connect-AzAccount -Identity`)
 2. Queries Resource Graph via `Invoke-RestMethod` for all VMs with both `shutdown` and `autoshutdown-enrolled` tags in the subscription
 3. Filters to VMs whose `shutdown` time falls within the current 15-minute window
-4. Skips VMs tagged `donotshutdown`
-5. Skips VMs already deallocated / powered off
+4. Skips VMs already deallocated / powered off
 6. Deallocates Azure VMs (REST `POST .../deallocate`) or stops Azure Local VMs (REST `POST .../stop`) in parallel (`ForEach-Object -Parallel`, throttle 20)
 
 #### `AutoStartup` — every 15 minutes
@@ -210,8 +207,7 @@ Same structure as AutoShutdown but in reverse:
 
 1. Queries Resource Graph for VMs with `startup` + `autoshutdown-enrolled`
 2. Filters to current 15-minute window
-3. Skips VMs tagged `donotstart`
-4. Skips VMs already running
+3. Skips VMs already running
 5. Starts Azure VMs (REST `POST .../start`) or Azure Local VMs (REST `POST .../start`) in parallel
 
 ### Time window logic (`Test-InWindow`)
@@ -281,7 +277,6 @@ Schedule fires
   → Get-AzAccessToken → call Resource Graph REST endpoint
   → Find all VMs with shutdown/startup + autoshutdown-enrolled in this subscription
   → For each VM in window (ForEach-Object -Parallel, throttle 20):
-     - Skip if donotshutdown / donotstart
      - Skip if already in desired power state
      - Act: REST deallocate or start (fire-and-forget, 202 Accepted)
   → Print summary to job output

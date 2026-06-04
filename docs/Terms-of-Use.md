@@ -34,7 +34,6 @@ Once installed, the Automation Account runs two PowerShell runbooks every 15 min
 
 - **AutoShutdown** — VMs tagged `shutdown = HH:mm` are deallocated at that local time each day
 - **AutoStartup** — VMs tagged `startup = HH:mm` are started at that local time each day
-- VMs tagged `donotshutdown` or `donotstart` are always skipped for the respective action
 - VMs tagged `autoshutdown-weekdays-only` are skipped on Saturday and Sunday — the VM stays deallocated for the entire weekend
 - VMs with no relevant tags are never touched
 
@@ -59,7 +58,7 @@ The Installer is responsible for:
 Anyone who adds `shutdown` or `startup` tags to a VM is responsible for:
 
 - Ensuring the VM and its workloads can safely tolerate automated shutdown
-- Adding `donotshutdown` / `donotstart` tags before maintenance windows or long-running jobs
+- Clearing the shutdown/startup times before maintenance windows or long-running jobs
 - Managing the configured times appropriately
 
 ### 4.3 No tenant-wide impact

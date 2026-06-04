@@ -265,7 +265,6 @@ Click **Sign in with Microsoft** — you are redirected to the Microsoft login p
 | Sign in | MSAL.js authenticates with Entra ID and gets an ARM access token |
 | Load VMs | App calls Resource Graph for tags and metadata, then ARM `statusOnly=true` for real-time power state |
 | Edit time | User types a time in `HH:mm` format — change is tracked locally, not saved yet |
-| Check "Exclude" | Marks the VM for `donotshutdown`/`donotstart` tag — tracked locally |
 | Save Changes | For each modified VM, app calls the Azure VM PATCH API to update the tag set. If a shutdown or startup time is set, `autoshutdown-enrolled` is added automatically. If both times are cleared, it is removed. |
 | Check "Weekdays only" | Marks the VM with `autoshutdown-weekdays-only` tag. The runbooks will skip shutdown and startup on Saturday and Sunday — VM stays deallocated for the whole weekend automatically |
 | Auto-refresh | Every 30 seconds while the VM table is visible, the app polls the ARM `statusOnly` endpoint and updates power state in place — no full reload needed |
@@ -288,7 +287,6 @@ All tag writes go through the Azure VM PATCH API (`Microsoft.Compute/virtualMach
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
 | Set or change shutdown / startup times | **Owner**, **Contributor**, or **Virtual Machine Contributor** on the subscription, resource group, or VM |
-| Exclude a VM from shutdown or startup | Same as above |
 | Install the AutoShutdown solution | **Owner** on the subscription |
 | Update runbooks | **Owner** or **Contributor** on the subscription |
 | Uninstall the AutoShutdown solution | **Owner** on the subscription |

@@ -21,7 +21,6 @@ Your access level determines what you can do in the app.
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
 | Set or change shutdown / startup times | **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM |
-| Exclude a VM from shutdown or startup | Same as above |
 | Install the AutoShutdown solution into a subscription | **Owner** on the subscription |
 | Update the AutoShutdown runbooks | **Owner** or **Contributor** on the subscription |
 | Uninstall the AutoShutdown solution | **Owner** on the subscription |
@@ -76,12 +75,9 @@ Click the **Load VMs** button. The table below populates with all VMs found in t
 | **VM Name** | The name of the virtual machine in Azure |
 | **Resource Group** | The resource group the VM belongs to |
 | **Status** | Current power state of the VM — refreshes every 30 seconds automatically |
-| **Shutdown** | The daily shutdown time in `HH:mm` (24-hour) format |
-| **Startup** | The daily startup time in `HH:mm` (24-hour) format |
-| **Do Not Shutdown** | When checked, the VM is never shut down regardless of the shutdown time |
-| **Do Not Start** | When checked, the VM is never started regardless of the startup time |
-
-Empty **Shutdown** or **Startup** fields mean no schedule is set for that action.
+| **Shutdown** | The daily shutdown time in `HH:mm` (24-hour) format — leave empty for no shutdown |
+| **Startup** | The daily startup time in `HH:mm` (24-hour) format — leave empty for no startup |
+| **Weekdays only** | When checked, shutdown and startup are skipped on Saturday and Sunday |
 
 Times are interpreted in the timezone configured for the subscription's Automation Account (default: `Central European Standard Time`).
 
@@ -120,22 +116,9 @@ The VM stays deallocated all weekend — compute cost drops to zero. Only the OS
 
 ---
 
-## Excluding a VM
-
-If a VM should never be shut down or started by the automation regardless of any time set:
-
-- Check **Do Not Shutdown** to prevent automatic shutdown
-- Check **Do Not Start** to prevent automatic startup
-
-These flags take priority over any time values set on the same VM.
-
----
-
 ## Removing a Schedule
 
 Clear the **Shutdown** or **Startup** field (delete the value) and click **Save Changes**. The corresponding tag is removed from the VM and the automation will no longer act on it for that action.
-
-Unchecking **Do Not Shutdown** or **Do Not Start** removes those exclusion tags.
 
 ---
 
@@ -223,7 +206,6 @@ You do not have sufficient permissions. All modifications require **Virtual Mach
 
 - Confirm the time was saved correctly — reload the page and check the value still appears
 - Verify the AutoShutdown solution is installed in the subscription (the status banner shows this)
-- Check that **Do Not Shutdown** / **Do Not Start** is not checked for that VM
 - The runbooks fire every 15 minutes — allow up to 15 minutes after the scheduled time
 - Check the Automation Account Jobs in the Azure Portal for any errors on that run
 

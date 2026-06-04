@@ -41,22 +41,10 @@ function VMRow({ vm, edit, onEdit, dirty }) {
           placeholder="HH:mm"
           value={edit.shutdown}
           onChange={e => onEdit(vm.id, 'shutdown', e.target.value)}
-          disabled={edit.noShutdown}
           maxLength={5}
           title="Shutdown time in HH:mm local time, e.g. 18:30. Leave empty to remove."
         />
         {badShutdown && <span className="field-error">Use HH:mm</span>}
-      </td>
-
-      <td className="td-toggle">
-        <label className="toggle" title="Tag VM with donotshutdown — automation will skip it">
-          <input
-            type="checkbox"
-            checked={edit.noShutdown}
-            onChange={e => onEdit(vm.id, 'noShutdown', e.target.checked)}
-          />
-          <span>Exclude</span>
-        </label>
       </td>
 
       <td className="td-time">
@@ -66,22 +54,10 @@ function VMRow({ vm, edit, onEdit, dirty }) {
           placeholder="HH:mm"
           value={edit.startup}
           onChange={e => onEdit(vm.id, 'startup', e.target.value)}
-          disabled={edit.noStart}
           maxLength={5}
           title="Startup time in HH:mm local time, e.g. 07:00. Leave empty to remove."
         />
         {badStartup && <span className="field-error">Use HH:mm</span>}
-      </td>
-
-      <td className="td-toggle">
-        <label className="toggle" title="Tag VM with donotstart — automation will skip it">
-          <input
-            type="checkbox"
-            checked={edit.noStart}
-            onChange={e => onEdit(vm.id, 'noStart', e.target.checked)}
-          />
-          <span>Exclude</span>
-        </label>
       </td>
 
       <td className="td-toggle">
@@ -134,28 +110,26 @@ export default function VMTable({ vms, edits, onEdit, isDirty }) {
               <th rowSpan={2}>Resource Group</th>
               <th rowSpan={2}>Location</th>
               <th rowSpan={2}>Status</th>
-              <th colSpan={2} className="th-group">Shutdown</th>
-              <th colSpan={2} className="th-group">Startup</th>
+              <th className="th-group">Shutdown</th>
+              <th className="th-group">Startup</th>
               <th rowSpan={2}>Weekdays only</th>
             </tr>
             <tr className="th-sub">
               <th>Time</th>
-              <th>Exclude</th>
               <th>Time</th>
-              <th>Exclude</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9} className="td-empty">No VMs match the filter.</td>
+                <td colSpan={7} className="td-empty">No VMs match the filter.</td>
               </tr>
             ) : (
               filtered.map(vm => (
                 <VMRow
                   key={vm.id}
                   vm={vm}
-                  edit={edits[vm.id] ?? { shutdown: '', startup: '', noShutdown: false, noStart: false, weekdaysOnly: false }}
+                  edit={edits[vm.id] ?? { shutdown: '', startup: '', weekdaysOnly: false }}
                   onEdit={onEdit}
                   dirty={isDirty(vm)}
                 />
