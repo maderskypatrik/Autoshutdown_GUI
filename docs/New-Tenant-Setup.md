@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager — Setting Up for a Different Tenant
+# VM Scheduler — Setting Up for a Different Tenant
 
 **PowerCloud Team · v2.0**
 **Last updated: 2026-06-01**
@@ -29,7 +29,7 @@ Log into the **Azure Portal for the new tenant** and follow the same steps as th
 
 1. Go to **Entra ID** → **App registrations** → **+ New registration**
 2. Fill in:
-   - **Name:** `VM Auto-shutdown Manager` (or any name)
+   - **Name:** `VM Scheduler` (or any name)
    - **Supported account types:** Accounts in this organizational directory only
    - **Redirect URI:** Single-page application → `http://localhost:5173`
 3. Click **Register**
@@ -114,4 +114,4 @@ For a full comparison of per-tenant vs. multi-tenant options, see [Multi-Tenant-
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · New Tenant Setup · v2.0*
+*PowerCloud Team · VM Scheduler · New Tenant Setup · v2.0*

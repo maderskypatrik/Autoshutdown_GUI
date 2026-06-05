@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager — Architecture
+# VM Scheduler — Architecture
 
 **PowerCloud Team · Last updated: 2026-06-02**
 

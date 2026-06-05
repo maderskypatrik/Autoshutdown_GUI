@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager — Setup Guide
+# VM Scheduler — Setup Guide
 
 **PowerCloud Team · v2.0**
 **Last updated: 2026-06-01**
@@ -43,7 +43,7 @@ This registers the app with Azure AD so users can sign in and the app can call A
 
 | Field | Value |
 |---|---|
-| **Name** | `VM Auto-shutdown Manager` (or any name you like) |
+| **Name** | `VM Scheduler` (or any name you like) |
 | **Supported account types** | **Accounts in this organizational directory only** (single tenant) |
 | **Redirect URI** | Select **Single-page application (SPA)** → enter `http://localhost:5173` |
 
@@ -193,7 +193,7 @@ GitHub Actions will automatically build and deploy. Check the **Actions** tab in
 
 ## Step 6 — Configure Confluence integration (optional)
 
-The app automatically records which subscriptions have the AutoShutdown solution installed in a Confluence page. This step is optional — the app works fully without it.
+The app automatically records which subscriptions have the VM Scheduler installed in a Confluence page. This step is optional — the app works fully without it.
 
 ### 6.1 Prepare the Confluence page
 
@@ -287,9 +287,9 @@ All tag writes go through the Azure VM PATCH API (`Microsoft.Compute/virtualMach
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
 | Set or change shutdown / startup times | **Owner**, **Contributor**, or **Virtual Machine Contributor** on the subscription, resource group, or VM |
-| Install the AutoShutdown solution | **Owner** on the subscription |
+| Install the VM Scheduler | **Owner** on the subscription |
 | Update runbooks | **Owner** or **Contributor** on the subscription |
-| Uninstall the AutoShutdown solution | **Owner** on the subscription |
+| Uninstall the VM Scheduler | **Owner** on the subscription |
 
 ---
 
@@ -357,4 +357,4 @@ Once deployed, any user who opens the app against a subscription with the old ve
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Setup Guide · v2.0*
+*PowerCloud Team · VM Scheduler · Setup Guide · v2.0*

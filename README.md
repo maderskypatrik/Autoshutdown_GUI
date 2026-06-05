@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager
+# VM Scheduler
 
 A self-service web app that lets Azure VM owners set daily shutdown and startup schedules directly from the browser — no tickets, no scripts, no central credentials.
 

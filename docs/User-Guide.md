@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager — User Guide
+# VM Scheduler — User Guide
 
 **PowerCloud Team · v2.0**
 **Last updated: 2026-06-01**
@@ -7,7 +7,7 @@
 
 ## Overview
 
-VM Auto-shutdown Manager is a web app that lets you set daily shutdown and startup schedules for Azure Virtual Machines. Schedules are stored as tags directly on the VM — there is no separate database or configuration file. Changes take effect at the next scheduled run (every 15 minutes).
+VM Scheduler is a web app that lets you set daily shutdown and startup schedules for Azure Virtual Machines. Schedules are stored as tags directly on the VM — there is no separate database or configuration file. Changes take effect at the next scheduled run (every 15 minutes).
 
 The app refreshes VM power states automatically every 30 seconds while the table is open — no manual reload needed to see whether a VM is running or stopped.
 
@@ -21,9 +21,9 @@ Your access level determines what you can do in the app.
 |---|---|
 | Sign in and view VMs | **Reader** on the subscription or resource group |
 | Set or change shutdown / startup times | **Virtual Machine Contributor**, **Contributor**, or **Owner** on the subscription, resource group, or VM |
-| Install the AutoShutdown solution into a subscription | **Owner** on the subscription |
-| Update the AutoShutdown runbooks | **Owner** or **Contributor** on the subscription |
-| Uninstall the AutoShutdown solution | **Owner** on the subscription |
+| Install the VM Scheduler into a subscription | **Owner** on the subscription |
+| Update the VM Scheduler runbooks | **Owner** or **Contributor** on the subscription |
+| Uninstall the VM Scheduler | **Owner** on the subscription |
 
 > If you can see VMs but cannot save changes, you have Reader access only. Contact your Azure administrator to request Virtual Machine Contributor or higher.
 
@@ -54,7 +54,7 @@ Once a subscription is selected, the **Resource Group** dropdown populates. Sele
 
 ### 3 — Check the install status banner
 
-Below the dropdowns, a status bar shows whether the AutoShutdown solution is installed in the selected subscription:
+Below the dropdowns, a status bar shows whether the VM Scheduler is installed in the selected subscription:
 
 | Banner | Meaning |
 |---|---|
@@ -124,7 +124,7 @@ Clear the **Shutdown** or **Startup** field (delete the value) and click **Save 
 
 ## Installing the Solution into a Subscription
 
-If the selected subscription has never had the AutoShutdown solution set up, a notice appears below the subscription selector. You must be an **Owner** of that subscription to proceed.
+If the selected subscription has never had the VM Scheduler set up, a notice appears below the subscription selector. You must be an **Owner** of that subscription to proceed.
 
 Clicking **Install** opens a wizard that:
 
@@ -132,7 +132,7 @@ Clicking **Install** opens a wizard that:
 2. Lets you choose a Resource Group, Automation Account name, and timezone
 3. Creates an **Azure Automation Account** with a system-assigned managed identity
 4. Assigns the managed identity Reader and Virtual Machine Contributor roles at subscription scope, and Automation Contributor at resource group scope
-5. Publishes the AutoShutdown and AutoStartup runbooks into the account
+5. Publishes VM Scheduler and AutoStartup runbooks into the account
 6. Creates schedules that fire every 15 minutes, aligned to clock boundaries
 
 The installation takes approximately 3–5 minutes. Once complete, the runbooks will act on any VMs that have the relevant tags, starting from the next 15-minute interval.
@@ -143,7 +143,7 @@ If your administrator has configured the Confluence integration, the subscriptio
 
 ## Updating the Runbooks
 
-When a new version of the AutoShutdown runbooks is released, an amber **"Update available"** button appears in the install status bar.
+When a new version of the VM Scheduler runbooks is released, an amber **"Update available"** button appears in the install status bar.
 
 Clicking it opens a dialog that re-publishes both runbooks into your existing Automation Account without removing any resources, schedules, or role assignments. The update takes about 1–2 minutes. No reinstall is needed.
 
@@ -205,7 +205,7 @@ You do not have sufficient permissions. All modifications require **Virtual Mach
 ### VM did not shut down or start at the scheduled time
 
 - Confirm the time was saved correctly — reload the page and check the value still appears
-- Verify the AutoShutdown solution is installed in the subscription (the status banner shows this)
+- Verify the VM Scheduler is installed in the subscription (the status banner shows this)
 - The runbooks fire every 15 minutes — allow up to 15 minutes after the scheduled time
 - Check the Automation Account Jobs in the Azure Portal for any errors on that run
 
@@ -228,4 +228,4 @@ The app refreshes power state every 30 seconds automatically. If it still shows 
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · User Guide · v2.0*
+*PowerCloud Team · VM Scheduler · User Guide · v2.0*

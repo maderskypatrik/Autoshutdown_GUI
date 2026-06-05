@@ -1,4 +1,4 @@
-# VM Auto-shutdown — Terms of Use
+# VM Scheduler — Terms of Use
 
 **PowerCloud Team · v2.0 · Internal use only**
 **Last updated: 2026-06-01**
@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-These Terms of Use govern the installation and use of the VM Auto-shutdown & Auto-startup solution ("the Solution") deployed via the AutoShutdown Manager web application. By clicking **Install**, the person performing the installation ("the Installer") acknowledges that they have the authority to install software into the target Azure subscription and agrees to the terms set out below.
+These Terms of Use govern the installation and use of the VM Scheduler solution ("the Solution") deployed via the VM Scheduler web application. By clicking **Install**, the person performing the installation ("the Installer") acknowledges that they have the authority to install software into the target Azure subscription and agrees to the terms set out below.
 
 ---
 
@@ -101,7 +101,7 @@ When a new version of the runbooks is released, users will see an **"Update avai
 
 ## 7. Uninstallation
 
-The Solution can be uninstalled at any time using the **Uninstall** button in the AutoShutdown Manager. This removes all RBAC role assignments and deletes the Automation Account (the system-assigned managed identity is deleted automatically with it). VM tags are not modified by the uninstaller — any enrolled VMs will retain their tags but will no longer be acted on.
+The Solution can be uninstalled at any time using the **Uninstall** button in the VM Scheduler. This removes all RBAC role assignments and deletes the Automation Account (the system-assigned managed identity is deleted automatically with it). VM tags are not modified by the uninstaller — any enrolled VMs will retain their tags but will no longer be acted on.
 
 ---
 
@@ -113,4 +113,4 @@ If you do not agree, click Cancel.
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Terms of Use · v2.0*
+*PowerCloud Team · VM Scheduler · Terms of Use · v2.0*

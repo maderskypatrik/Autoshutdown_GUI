@@ -1,4 +1,4 @@
-# VM Auto-shutdown Manager — Multi-Tenant Deployment Guide
+# VM Scheduler — Multi-Tenant Deployment Guide
 
 **PowerCloud Team · v2.0**
 **Last updated: 2026-06-01**
@@ -177,4 +177,4 @@ Azure Lighthouse allows a service provider tenant to manage customer subscriptio
 
 ---
 
-*PowerCloud Team · VM Auto-shutdown Manager · Multi-Tenant Deployment Guide · v2.0*
+*PowerCloud Team · VM Scheduler · Multi-Tenant Deployment Guide · v2.0*
