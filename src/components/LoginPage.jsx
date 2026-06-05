@@ -14,7 +14,7 @@ export default function LoginPage() {
         <div className="login-logo">
           <img src="/powerco-wordmark.png" alt="PowerCo" className="login-logo-img" />
         </div>
-        <h1>VM Auto-shutdown Manager</h1>
+        <h1>VM Scheduler</h1>
         <p>
           Manage daily shutdown and startup schedules for your Azure VMs.<br />
           Set times per VM using Azure tags — directly from the browser,
