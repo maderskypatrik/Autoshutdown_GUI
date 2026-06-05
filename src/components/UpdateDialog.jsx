@@ -37,7 +37,7 @@ export default function UpdateDialog({ token, subId, installation, onClose, onUp
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !running && onClose()}>
       <div className="modal modal-sm">
         <div className="modal-header">
-          <span className="modal-title">Update AutoShutdown</span>
+          <span className="modal-title">Update VM Scheduler</span>
           {!running && <button className="modal-close" onClick={onClose}>✕</button>}
         </div>
         <div className="modal-body">
@@ -45,7 +45,7 @@ export default function UpdateDialog({ token, subId, installation, onClose, onUp
           {step === 1 && (
             <>
               <p className="wizard-intro">
-                A new version of the AutoShutdown runbooks is available. This will re-publish
+                A new version of the VM Scheduler runbooks is available. This will re-publish
                 the runbooks in <strong>{installation.automationAccountName}</strong> without
                 removing any resources, schedules, or role assignments.
               </p>

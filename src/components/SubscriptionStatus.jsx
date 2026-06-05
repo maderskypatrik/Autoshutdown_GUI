@@ -49,7 +49,7 @@ export default function SubscriptionStatus({ status, currentVersion, onInstall, 
     return (
       <div className="sub-status sub-status-checking">
         <span className="sub-status-icon">⏳</span>
-        Checking AutoShutdown status…
+        Checking VM Scheduler status…
       </div>
     )
   }

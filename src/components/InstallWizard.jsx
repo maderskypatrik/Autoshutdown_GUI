@@ -66,7 +66,7 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !running && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <span className="modal-title">Install AutoShutdown</span>
+          <span className="modal-title">Install VM Scheduler</span>
           {!running && (
             <button className="modal-close" onClick={onClose}>✕</button>
           )}
@@ -87,7 +87,7 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
           {step === 1 && (
             <>
               <p className="wizard-intro">
-                Before installing AutoShutdown into your Azure subscription, please read and accept the Terms of Use.
+                Before installing VM Scheduler into your Azure subscription, please read and accept the Terms of Use.
               </p>
               <div className="tou-box">
                 <p><strong>What will be installed:</strong></p>
