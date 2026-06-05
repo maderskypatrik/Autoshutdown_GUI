@@ -28,7 +28,7 @@ const MANAGED_TAG_VAL     = 'v4-automation'
 const MI_PRINCIPAL_TAG    = 'autoshutdown-mi-principal-id'
 const MANAGED_TAG_VERSION = 'autoshutdown-version'
 
-export const RUNBOOK_VERSION = '20260620'
+export const RUNBOOK_VERSION = '20260625'
 
 const ROLE_VM_CONTRIBUTOR         = '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
 const ROLE_READER                 = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'

@@ -8,7 +8,7 @@ export default function Header({ account }) {
       <div className="header-brand">
         <img src="/brand_dark.svg" alt="PowerCo" className="header-logo-icon" />
         <div className="header-divider" />
-        <span className="header-title">VM Auto-shutdown Manager</span>
+        <span className="header-title">VM Scheduler</span>
       </div>
       <div className="header-user">
         <span className="header-username">{account?.username}</span>

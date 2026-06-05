@@ -58,7 +58,7 @@ export default function SubscriptionStatus({ status, currentVersion, onInstall, 
     return (
       <div className="sub-status sub-status-not-installed">
         <span className="sub-status-icon">○</span>
-        <span>AutoShutdown is <strong>not installed</strong> in this subscription.</span>
+        <span>VM Scheduler is <strong>not installed</strong> in this subscription.</span>
         <button className="btn btn-install" onClick={onInstall}>Install</button>
       </div>
     )
@@ -71,7 +71,7 @@ export default function SubscriptionStatus({ status, currentVersion, onInstall, 
       <div className="sub-status sub-status-installed">
         <span className="sub-status-icon">✓</span>
         <span>
-          AutoShutdown is <strong>installed</strong>:&nbsp;
+          VM Scheduler is <strong>installed</strong>:&nbsp;
           <span className="sub-status-detail">{status.functionAppName}</span>
           <span className="sub-status-sep">·</span>
           <span className="sub-status-detail">{status.resourceGroup}</span>
