@@ -100,7 +100,7 @@ export default function InstallWizard({ token, subId, subscriptionName, installe
                   <li>Reader at subscription scope</li>
                   <li>Automation Contributor at Automation Account scope (required for self-update)</li>
                 </ul>
-                <p><strong>Estimated cost:</strong> Free tier (500 minutes/month included). Typical usage is well within the free tier.</p>
+                <p><strong>Estimated cost:</strong> ~$10–12/month. Azure Automation includes 500 free minutes/month; the two runbooks running every 15 minutes use approximately 5,760 minutes/month, with the remainder billed at $0.002/minute.</p>
                 <p><strong>Disclaimer:</strong> The PowerCloud Team accepts no responsibility for data loss, service interruption, or Azure costs resulting from use of this solution.</p>
                 <p>
                   <a href="https://devstack.vwgroup.com/confluence/x/oN1ltgE" target="_blank" rel="noreferrer">View full Terms of Use ↗</a>
