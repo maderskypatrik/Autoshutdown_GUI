@@ -6,7 +6,14 @@ export default function Header({ account }) {
   return (
     <header className="header">
       <div className="header-brand">
-        <img src="/brand_dark.svg" alt="PowerCo" className="header-logo-icon" />
+        <a
+          href="https://cloud.powerco.tech"
+          className="header-logo-link"
+          title="Back to Cloud Portfolio"
+          aria-label="Back to Cloud Portfolio"
+        >
+          <img src="/brand_dark.svg" alt="PowerCo" className="header-logo-icon" />
+        </a>
         <div className="header-divider" />
         <span className="header-title">VM Scheduler</span>
       </div>

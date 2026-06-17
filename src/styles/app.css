@@ -66,6 +66,15 @@ body {
   align-items: center;
   gap: 9px;
 }
+.header-logo-link {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.header-logo-link:hover {
+  opacity: 0.8;
+}
 .header-logo-icon {
   height: 26px;
   width: auto;
